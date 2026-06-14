@@ -1,0 +1,28 @@
+{
+  "name": "whatsapp-ai-clone-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WhatsApp AI Clone Bot — Mimic any WhatsApp contact with AI",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:backend dev:frontend",
+    "dev:backend": "npm --workspace @wa-ai-bot/backend run dev",
+    "dev:frontend": "npm --workspace @wa-ai-bot/frontend run dev",
+    "build": "npm-run-all build:backend build:frontend",
+    "build:backend": "npm --workspace @wa-ai-bot/backend run build",
+    "build:frontend": "npm --workspace @wa-ai-bot/frontend run build",
+    "typecheck": "npm-run-all typecheck:backend typecheck:frontend",
+    "typecheck:backend": "npm --workspace @wa-ai-bot/backend run typecheck",
+    "typecheck:frontend": "npm --workspace @wa-ai-bot/frontend run typecheck",
+    "start": "npm --workspace @wa-ai-bot/backend run start"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
