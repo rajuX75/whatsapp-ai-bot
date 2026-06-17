@@ -18,8 +18,18 @@ export interface ActiveTarget {
   setAt: number;
 }
 
+export interface BotTarget {
+  sessionId: number;
+  contactJid: string;
+  contactName: string;
+  enabled: boolean;
+  customPrompt: string | null;
+  createdAt: number;
+}
+
 export interface StyleProfile {
   sessionId: number;
+  contactJid: string;
   avgMsgLength: number;
   emojiRatio: number;
   topEmojis: string[];
@@ -39,4 +49,42 @@ export interface ConversationLogEntry {
   content: string;
   aiGenerated: boolean;
   sentAt: number;
+  contactJid: string | null;
+}
+
+export interface RuntimeSettings {
+  llmProvider: 'anthropic' | 'openai' | 'ollama' | 'openrouter' | 'gemini';
+  llmModel: string;
+  temperature: number;
+  maxTokens: number;
+  contextWindow: number;
+
+  replyDelayMin: number;
+  replyDelayMax: number;
+  typingIndicator: boolean;
+  burstSplitEnabled: boolean;
+  antiBanJitter: boolean;
+
+  replyToGroups: boolean;
+  replyToUnknown: boolean;
+  ignoreRegex: string;
+  allowedKeywords: string;
+  ignoredKeywords: string;
+
+  activeHoursStart: number;
+  activeHoursEnd: number;
+  weekendEnabled: boolean;
+  timezoneOffset: number;
+
+  emojiBoost: number;
+  styleStrictness: number;
+  languageOverride: string;
+
+  maxRepliesPerHour: number;
+  rateLimitEnabled: boolean;
+  doNotDisturb: boolean;
+
+  readReceipts: boolean;
+  logRetentionDays: number;
+  globalSystemPrompt: string;
 }

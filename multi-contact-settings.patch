@@ -1,0 +1,3087 @@
+diff --git a/README.md b/README.md
+index a8b999d..e10f7b0 100644
+--- a/README.md
++++ b/README.md
+@@ -7,8 +7,10 @@ Mimic any WhatsApp contact with AI — Powered by Open-Source.
+ ## ✨ Features
+ 
+ - 📱 **WhatsApp QR Login** — Connects via Baileys (open-source WhatsApp Web API).
+-- 👥 **Contact Selector** — Pick exactly **one** target contact at a time.
+-- 📂 **Chat History Import** — Upload exported chat as `.zip` or `.txt`.
++- 👥 **Multi-Contact Selector** — Pick **one or many** target contacts and toggle auto-reply per contact (or for all of them at once).
++- 💬 **Per-Contact Custom Prompts** — Give each contact its own system-prompt override to get a different response style per person.
++- 📂 **Per-Contact Chat History Import** — Upload separate `.zip`/`.txt` exports for different contacts, each producing its own style profile.
++- ⚙️ **20+ Runtime Settings** — Live-editable UI for model, sampling, schedule, filters, rate limits, anti-ban, etc. No restart required.
+ - 🧠 **Style Fingerprinting** — Extracts message length, emoji ratio, punctuation, vocabulary, burst pattern, active hours.
+ - 🤖 **LLM-Powered Replies** — Supports Anthropic Claude, OpenAI GPT-4o, and local Ollama (Llama 3.1 / Mistral).
+ - ⌨️ **Human-like Typing** — Random delays, presence updates, message bursts.
+@@ -82,23 +84,88 @@ See `packages/backend/.env.example`. The most important:
+ 
+ ## 📡 API Reference
+ 
++### Connection / contacts
++
++| Method | Path | Purpose |
++|--------|------|---------|
++| GET  | `/api/auth/qr`            | Current QR (also via `/ws/qr`) |
++| GET  | `/api/auth/status`        | Connection status |
++| POST | `/api/auth/logout`        | Clear session |
++| GET  | `/api/contacts`           | List recent contacts |
++| POST | `/api/contacts/select`    | Pick the legacy single target |
++| GET  | `/api/contacts/active`    | Current legacy target |
++
++### Multi-target management (new)
++
++| Method | Path | Purpose |
++|--------|------|---------|
++| GET    | `/api/contacts/targets`                  | List every bot target |
++| POST   | `/api/contacts/targets`                  | Add (or upsert) a target — `{ jid, name?, enabled?, customPrompt? }` |
++| DELETE | `/api/contacts/targets/:jid`             | Remove a target |
++| POST   | `/api/contacts/targets/:jid/toggle`      | Enable/disable auto-reply for one contact — `{ enabled }` |
++| POST   | `/api/contacts/targets/all/toggle`       | Enable/disable for **all** targets — `{ enabled }` |
++| PUT    | `/api/contacts/targets/:jid/prompt`      | Set/clear per-contact custom prompt — `{ customPrompt }` |
++
++### Chat / style / logs
++
++| Method | Path | Purpose |
++|--------|------|---------|
++| POST | `/api/upload/chat`             | Upload export for the legacy active target |
++| POST | `/api/upload/chat/:jid`        | Upload export and bind it to a specific contact |
++| GET  | `/api/upload/status`           | Parse progress |
++| GET  | `/api/style-profile?jid=...`   | Style fingerprint (optional per-contact) |
++| GET  | `/api/bot/status`              | Is the global bot enabled? |
++| POST | `/api/bot/toggle`              | Master enable / disable |
++| GET  | `/api/bot/logs?jid=...`        | Recent conversation log (optional per-contact) |
++
++### Settings (new — live editable)
++
++| Method | Path | Purpose |
++|--------|------|---------|
++| GET    | `/api/settings`         | Current merged settings + defaults |
++| PUT    | `/api/settings`         | Patch any subset of the 26 runtime settings |
++| POST   | `/api/settings/reset`   | Reset all UI settings (env defaults remain) |
++
++### WebSockets
++
+ | Method | Path | Purpose |
+ |--------|------|---------|
+-| GET  | `/api/auth/qr`        | Current QR (also via `/ws/qr`) |
+-| GET  | `/api/auth/status`    | Connection status |
+-| POST | `/api/auth/logout`    | Clear session |
+-| GET  | `/api/contacts`       | List recent contacts |
+-| POST | `/api/contacts/select`| Pick target contact |
+-| GET  | `/api/contacts/active`| Current target |
+-| POST | `/api/upload/chat`    | Upload `.zip`/`.txt` chat export |
+-| GET  | `/api/upload/status`  | Parse progress |
+-| GET  | `/api/style-profile`  | Extracted style fingerprint |
+-| GET  | `/api/bot/status`     | Is the bot replying? |
+-| POST | `/api/bot/toggle`     | Enable / disable |
+-| GET  | `/api/logs`           | Recent conversation log |
+ | WS   | `/ws/qr`              | QR code stream |
+ | WS   | `/ws/messages`        | Live message stream |
+ 
++## ⚙️ Runtime Settings (UI)
++
++The **Settings** page exposes a fully functional form for every setting below. They are persisted in SQLite (table `settings`) and applied on the *very next* incoming message — no restart needed.
++
++| Group | Setting | Description |
++|-------|---------|-------------|
++| AI    | `llmProvider`            | Anthropic / OpenAI / Ollama / OpenRouter / Gemini |
++| AI    | `llmModel`               | Override the provider's model name (empty = `.env` default) |
++| AI    | `temperature`            | 0 – 2 sampler |
++| AI    | `maxTokens`              | Reply length cap |
++| AI    | `contextWindow`          | # of recent messages in the prompt |
++| Reply | `replyDelayMin/Max`      | Human-like typing window (ms) |
++| Reply | `typingIndicator`        | Send presence: composing |
++| Reply | `burstSplitEnabled`      | Allow multi-message bursts |
++| Reply | `antiBanJitter`          | Extra random delay |
++| Filter| `replyToGroups`          | Allow group replies |
++| Filter| `replyToUnknown`         | Reply to JIDs not in your target list |
++| Filter| `ignoreRegex`            | Skip messages matching this regex |
++| Filter| `allowedKeywords`        | Comma list — only reply when present |
++| Filter| `ignoredKeywords`        | Comma list — skip when present |
++| Sched | `activeHoursStart/End`   | Hour window (wraps over midnight) |
++| Sched | `weekendEnabled`         | Reply on Sat/Sun |
++| Sched | `timezoneOffset`         | Minutes vs UTC |
++| Style | `emojiBoost`             | -1..+1 emoji density nudge |
++| Style | `styleStrictness`        | 0..1 how closely to follow the fingerprint |
++| Style | `languageOverride`       | ISO code, empty = auto |
++| Safety| `maxRepliesPerHour`      | Hard cap when rate-limit is on |
++| Safety| `rateLimitEnabled`       | Turn the hourly cap on/off |
++| Safety| `doNotDisturb`           | Kill switch — ignore ALL inbound |
++| Misc  | `readReceipts`           | Mark inbound as read |
++| Misc  | `logRetentionDays`       | Days to keep logs |
++| Misc  | `globalSystemPrompt`     | Injected into the prompt for **every** contact |
++
+ ## 📁 Chat Export Format
+ 
+ Standard WhatsApp export, e.g.:
+diff --git a/packages/backend/src/db/repository.ts b/packages/backend/src/db/repository.ts
+index 4063a42..e838aad 100644
+--- a/packages/backend/src/db/repository.ts
++++ b/packages/backend/src/db/repository.ts
+@@ -1,11 +1,16 @@
+ import { db } from './schema.js';
+-import type {
+-  ActiveTarget,
+-  ConversationLogEntry,
+-  ParsedMessage,
+-  StyleProfile,
++import {
++  DEFAULT_SETTINGS,
++  type ActiveTarget,
++  type BotTarget,
++  type ConversationLogEntry,
++  type ParsedMessage,
++  type RuntimeSettings,
++  type StyleProfile,
+ } from '../types/index.js';
+ 
++const DEFAULT_PROFILE_KEY = '__default__';
++
+ // -------------------- sessions --------------------
+ 
+ export function getOrCreateSession(phone: string | null): number {
+@@ -24,7 +29,7 @@ export function updateSessionStatus(sessionId: number, status: string): void {
+   db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run(status, sessionId);
+ }
+ 
+-// -------------------- active target --------------------
++// -------------------- active target (legacy single-target) --------------------
+ 
+ export function setActiveTarget(
+   sessionId: number,
+@@ -40,6 +45,9 @@ export function setActiveTarget(
+        contact_name = excluded.contact_name,
+        set_at = excluded.set_at`,
+   ).run(sessionId, contactJid, contactName, setAt);
++  // Also ensure the target row exists in the multi-target table so the
++  // legacy UI keeps working.
++  upsertBotTarget(sessionId, contactJid, contactName);
+   return { sessionId, contactJid, contactName, setAt };
+ }
+ 
+@@ -67,34 +75,139 @@ export function clearActiveTarget(sessionId: number): void {
+   db.prepare('DELETE FROM active_target WHERE session_id = ?').run(sessionId);
+ }
+ 
++// -------------------- multi-contact bot targets --------------------
++
++interface BotTargetRow {
++  session_id: number;
++  contact_jid: string;
++  contact_name: string;
++  enabled: number;
++  custom_prompt: string | null;
++  created_at: number;
++}
++
++function rowToTarget(row: BotTargetRow): BotTarget {
++  return {
++    sessionId: row.session_id,
++    contactJid: row.contact_jid,
++    contactName: row.contact_name,
++    enabled: row.enabled === 1,
++    customPrompt: row.custom_prompt,
++    createdAt: row.created_at,
++  };
++}
++
++export function listBotTargets(sessionId: number): BotTarget[] {
++  const rows = db
++    .prepare<[number], BotTargetRow>(
++      'SELECT * FROM bot_targets WHERE session_id = ? ORDER BY created_at ASC',
++    )
++    .all(sessionId);
++  return rows.map(rowToTarget);
++}
++
++export function upsertBotTarget(
++  sessionId: number,
++  contactJid: string,
++  contactName: string,
++): BotTarget {
++  const now = Date.now();
++  db.prepare(
++    `INSERT INTO bot_targets (session_id, contact_jid, contact_name, enabled, custom_prompt, created_at)
++     VALUES (?, ?, ?, 0, NULL, ?)
++     ON CONFLICT(session_id, contact_jid) DO UPDATE SET
++       contact_name = excluded.contact_name`,
++  ).run(sessionId, contactJid, contactName, now);
++  return getBotTarget(sessionId, contactJid)!;
++}
++
++export function getBotTarget(sessionId: number, contactJid: string): BotTarget | null {
++  const row = db
++    .prepare<[number, string], BotTargetRow>(
++      'SELECT * FROM bot_targets WHERE session_id = ? AND contact_jid = ?',
++    )
++    .get(sessionId, contactJid);
++  return row ? rowToTarget(row) : null;
++}
++
++export function deleteBotTarget(sessionId: number, contactJid: string): void {
++  db.prepare('DELETE FROM bot_targets WHERE session_id = ? AND contact_jid = ?').run(
++    sessionId,
++    contactJid,
++  );
++}
++
++export function setBotTargetEnabled(
++  sessionId: number,
++  contactJid: string,
++  enabled: boolean,
++): void {
++  db.prepare(
++    'UPDATE bot_targets SET enabled = ? WHERE session_id = ? AND contact_jid = ?',
++  ).run(enabled ? 1 : 0, sessionId, contactJid);
++}
++
++export function setAllBotTargetsEnabled(sessionId: number, enabled: boolean): void {
++  db.prepare('UPDATE bot_targets SET enabled = ? WHERE session_id = ?').run(
++    enabled ? 1 : 0,
++    sessionId,
++  );
++}
++
++export function setBotTargetPrompt(
++  sessionId: number,
++  contactJid: string,
++  prompt: string | null,
++): void {
++  db.prepare(
++    'UPDATE bot_targets SET custom_prompt = ? WHERE session_id = ? AND contact_jid = ?',
++  ).run(prompt && prompt.trim() ? prompt : null, sessionId, contactJid);
++}
++
+ // -------------------- chat messages (history import) --------------------
+ 
+ export function bulkInsertChatMessages(
+   sessionId: number,
+   messages: ParsedMessage[],
++  contactJid: string | null = null,
+ ): number {
+   const stmt = db.prepare(
+-    'INSERT INTO chat_messages (session_id, sender, timestamp, content) VALUES (?, ?, ?, ?)',
++    'INSERT INTO chat_messages (session_id, sender, timestamp, content, contact_jid) VALUES (?, ?, ?, ?, ?)',
+   );
+   const tx = db.transaction((rows: ParsedMessage[]) => {
+     for (const m of rows) {
+-      stmt.run(sessionId, m.sender, m.timestamp.getTime(), m.content);
++      stmt.run(sessionId, m.sender, m.timestamp.getTime(), m.content, contactJid);
+     }
+   });
+   tx(messages);
+   return messages.length;
+ }
+ 
+-export function clearChatMessages(sessionId: number): void {
+-  db.prepare('DELETE FROM chat_messages WHERE session_id = ?').run(sessionId);
++export function clearChatMessages(sessionId: number, contactJid: string | null = null): void {
++  if (contactJid) {
++    db.prepare(
++      'DELETE FROM chat_messages WHERE session_id = ? AND contact_jid = ?',
++    ).run(sessionId, contactJid);
++  } else {
++    db.prepare('DELETE FROM chat_messages WHERE session_id = ?').run(sessionId);
++  }
+ }
+ 
+-export function getChatMessages(sessionId: number): ParsedMessage[] {
+-  const rows = db
+-    .prepare<[number], { sender: string; timestamp: number; content: string }>(
+-      'SELECT sender, timestamp, content FROM chat_messages WHERE session_id = ? ORDER BY timestamp ASC',
+-    )
+-    .all(sessionId);
++export function getChatMessages(
++  sessionId: number,
++  contactJid: string | null = null,
++): ParsedMessage[] {
++  const rows = contactJid
++    ? db
++        .prepare<[number, string], { sender: string; timestamp: number; content: string }>(
++          'SELECT sender, timestamp, content FROM chat_messages WHERE session_id = ? AND contact_jid = ? ORDER BY timestamp ASC',
++        )
++        .all(sessionId, contactJid)
++    : db
++        .prepare<[number], { sender: string; timestamp: number; content: string }>(
++          'SELECT sender, timestamp, content FROM chat_messages WHERE session_id = ? ORDER BY timestamp ASC',
++        )
++        .all(sessionId);
+   return rows.map((r) => ({
+     sender: r.sender,
+     timestamp: new Date(r.timestamp),
+@@ -104,13 +217,46 @@ export function getChatMessages(sessionId: number): ParsedMessage[] {
+ 
+ // -------------------- style profiles --------------------
+ 
++interface StyleProfileRow {
++  session_id: number;
++  contact_jid: string;
++  avg_msg_length: number;
++  emoji_ratio: number;
++  top_emojis: string;
++  capitalization: string;
++  punctuation: string;
++  top_phrases: string;
++  burst_pattern: string;
++  avg_burst_count: number;
++  active_hours: string;
++  language: string;
++}
++
++function rowToProfile(row: StyleProfileRow): StyleProfile {
++  return {
++    sessionId: row.session_id,
++    contactJid: row.contact_jid,
++    avgMsgLength: row.avg_msg_length,
++    emojiRatio: row.emoji_ratio,
++    topEmojis: JSON.parse(row.top_emojis) as string[],
++    capitalization: row.capitalization as StyleProfile['capitalization'],
++    punctuation: JSON.parse(row.punctuation) as Record<string, number>,
++    topPhrases: JSON.parse(row.top_phrases) as string[],
++    burstPattern: row.burst_pattern as StyleProfile['burstPattern'],
++    avgBurstCount: row.avg_burst_count,
++    activeHours: JSON.parse(row.active_hours) as number[],
++    language: row.language,
++  };
++}
++
+ export function saveStyleProfile(profile: StyleProfile): void {
++  const contactJid = profile.contactJid || DEFAULT_PROFILE_KEY;
+   db.prepare(
+     `INSERT INTO style_profiles (
+-       session_id, avg_msg_length, emoji_ratio, top_emojis, capitalization,
++       session_id, contact_jid, avg_msg_length, emoji_ratio, top_emojis, capitalization,
+        punctuation, top_phrases, burst_pattern, avg_burst_count, active_hours, language
+-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+-     ON CONFLICT(session_id) DO UPDATE SET
++     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++     ON CONFLICT(session_id, contact_jid) DO UPDATE SET
+        avg_msg_length   = excluded.avg_msg_length,
+        emoji_ratio      = excluded.emoji_ratio,
+        top_emojis       = excluded.top_emojis,
+@@ -123,6 +269,7 @@ export function saveStyleProfile(profile: StyleProfile): void {
+        language         = excluded.language`,
+   ).run(
+     profile.sessionId,
++    contactJid,
+     profile.avgMsgLength,
+     profile.emojiRatio,
+     JSON.stringify(profile.topEmojis),
+@@ -136,36 +283,24 @@ export function saveStyleProfile(profile: StyleProfile): void {
+   );
+ }
+ 
+-export function getStyleProfile(sessionId: number): StyleProfile | null {
+-  const row = db
+-    .prepare<[number], {
+-      session_id: number;
+-      avg_msg_length: number;
+-      emoji_ratio: number;
+-      top_emojis: string;
+-      capitalization: string;
+-      punctuation: string;
+-      top_phrases: string;
+-      burst_pattern: string;
+-      avg_burst_count: number;
+-      active_hours: string;
+-      language: string;
+-    }>('SELECT * FROM style_profiles WHERE session_id = ?')
+-    .get(sessionId);
+-  if (!row) return null;
+-  return {
+-    sessionId: row.session_id,
+-    avgMsgLength: row.avg_msg_length,
+-    emojiRatio: row.emoji_ratio,
+-    topEmojis: JSON.parse(row.top_emojis) as string[],
+-    capitalization: row.capitalization as StyleProfile['capitalization'],
+-    punctuation: JSON.parse(row.punctuation) as Record<string, number>,
+-    topPhrases: JSON.parse(row.top_phrases) as string[],
+-    burstPattern: row.burst_pattern as StyleProfile['burstPattern'],
+-    avgBurstCount: row.avg_burst_count,
+-    activeHours: JSON.parse(row.active_hours) as number[],
+-    language: row.language,
+-  };
++export function getStyleProfile(
++  sessionId: number,
++  contactJid: string | null = null,
++): StyleProfile | null {
++  // Prefer contact-specific profile, fall back to default.
++  const key = contactJid ?? DEFAULT_PROFILE_KEY;
++  const row =
++    db
++      .prepare<[number, string], StyleProfileRow>(
++        'SELECT * FROM style_profiles WHERE session_id = ? AND contact_jid = ?',
++      )
++      .get(sessionId, key) ??
++    db
++      .prepare<[number, string], StyleProfileRow>(
++        'SELECT * FROM style_profiles WHERE session_id = ? AND contact_jid = ?',
++      )
++      .get(sessionId, DEFAULT_PROFILE_KEY);
++  return row ? rowToProfile(row) : null;
+ }
+ 
+ // -------------------- conversation log --------------------
+@@ -175,13 +310,14 @@ export function logConversation(
+   direction: 'in' | 'out',
+   content: string,
+   aiGenerated: boolean,
++  contactJid: string | null = null,
+ ): ConversationLogEntry {
+   const sentAt = Date.now();
+   const info = db
+     .prepare(
+-      'INSERT INTO conversation_log (session_id, direction, content, ai_generated, sent_at) VALUES (?, ?, ?, ?, ?)',
++      'INSERT INTO conversation_log (session_id, direction, content, ai_generated, sent_at, contact_jid) VALUES (?, ?, ?, ?, ?, ?)',
+     )
+-    .run(sessionId, direction, content, aiGenerated ? 1 : 0, sentAt);
++    .run(sessionId, direction, content, aiGenerated ? 1 : 0, sentAt, contactJid);
+   return {
+     id: Number(info.lastInsertRowid),
+     sessionId,
+@@ -189,25 +325,42 @@ export function logConversation(
+     content,
+     aiGenerated,
+     sentAt,
++    contactJid,
+   };
+ }
+ 
+ export function recentConversation(
+   sessionId: number,
+   limit = 100,
++  contactJid: string | null = null,
+ ): ConversationLogEntry[] {
+-  const rows = db
+-    .prepare<[number, number], {
+-      id: number;
+-      session_id: number;
+-      direction: string;
+-      content: string;
+-      ai_generated: number;
+-      sent_at: number;
+-    }>(
+-      'SELECT id, session_id, direction, content, ai_generated, sent_at FROM conversation_log WHERE session_id = ? ORDER BY id DESC LIMIT ?',
+-    )
+-    .all(sessionId, limit);
++  const rows = contactJid
++    ? db
++        .prepare<[number, string, number], {
++          id: number;
++          session_id: number;
++          direction: string;
++          content: string;
++          ai_generated: number;
++          sent_at: number;
++          contact_jid: string | null;
++        }>(
++          'SELECT id, session_id, direction, content, ai_generated, sent_at, contact_jid FROM conversation_log WHERE session_id = ? AND contact_jid = ? ORDER BY id DESC LIMIT ?',
++        )
++        .all(sessionId, contactJid, limit)
++    : db
++        .prepare<[number, number], {
++          id: number;
++          session_id: number;
++          direction: string;
++          content: string;
++          ai_generated: number;
++          sent_at: number;
++          contact_jid: string | null;
++        }>(
++          'SELECT id, session_id, direction, content, ai_generated, sent_at, contact_jid FROM conversation_log WHERE session_id = ? ORDER BY id DESC LIMIT ?',
++        )
++        .all(sessionId, limit);
+   return rows.map((r) => ({
+     id: r.id,
+     sessionId: r.session_id,
+@@ -215,5 +368,53 @@ export function recentConversation(
+     content: r.content,
+     aiGenerated: r.ai_generated === 1,
+     sentAt: r.sent_at,
++    contactJid: r.contact_jid,
+   }));
+ }
++
++export function countRecentOutbound(sessionId: number, sinceMs: number): number {
++  const row = db
++    .prepare<[number, string, number], { c: number }>(
++      'SELECT COUNT(*) as c FROM conversation_log WHERE session_id = ? AND direction = ? AND sent_at >= ?',
++    )
++    .get(sessionId, 'out', sinceMs);
++  return row?.c ?? 0;
++}
++
++// -------------------- settings --------------------
++
++export function getAllSettings(): Record<string, unknown> {
++  const rows = db
++    .prepare<[], { key: string; value: string }>('SELECT key, value FROM settings')
++    .all();
++  const out: Record<string, unknown> = {};
++  for (const r of rows) {
++    try {
++      out[r.key] = JSON.parse(r.value);
++    } catch {
++      out[r.key] = r.value;
++    }
++  }
++  return out;
++}
++
++export function getMergedSettings(): RuntimeSettings {
++  const stored = getAllSettings() as Partial<RuntimeSettings>;
++  return { ...DEFAULT_SETTINGS, ...stored };
++}
++
++export function saveSettings(patch: Record<string, unknown>): void {
++  const now = Date.now();
++  const stmt = db.prepare(
++    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
++     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
++  );
++  const tx = db.transaction((entries: Array<[string, unknown]>) => {
++    for (const [k, v] of entries) stmt.run(k, JSON.stringify(v), now);
++  });
++  tx(Object.entries(patch));
++}
++
++export function resetSettings(): void {
++  db.prepare('DELETE FROM settings').run();
++}
+diff --git a/packages/backend/src/db/schema.ts b/packages/backend/src/db/schema.ts
+index 60fbaf5..f935f85 100644
+--- a/packages/backend/src/db/schema.ts
++++ b/packages/backend/src/db/schema.ts
+@@ -32,13 +32,16 @@ CREATE TABLE IF NOT EXISTS chat_messages (
+   sender TEXT NOT NULL,
+   timestamp INTEGER NOT NULL,
+   content TEXT NOT NULL,
++  contact_jid TEXT,
+   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+ );
+ 
+ CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
++CREATE INDEX IF NOT EXISTS idx_chat_messages_contact ON chat_messages(contact_jid);
+ 
+ CREATE TABLE IF NOT EXISTS style_profiles (
+-  session_id INTEGER PRIMARY KEY,
++  session_id INTEGER NOT NULL,
++  contact_jid TEXT NOT NULL DEFAULT '__default__',
+   avg_msg_length REAL NOT NULL,
+   emoji_ratio REAL NOT NULL,
+   top_emojis TEXT NOT NULL,
+@@ -49,6 +52,7 @@ CREATE TABLE IF NOT EXISTS style_profiles (
+   avg_burst_count REAL NOT NULL,
+   active_hours TEXT NOT NULL,
+   language TEXT NOT NULL,
++  PRIMARY KEY (session_id, contact_jid),
+   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+ );
+ 
+@@ -59,13 +63,51 @@ CREATE TABLE IF NOT EXISTS conversation_log (
+   content TEXT NOT NULL,
+   ai_generated INTEGER NOT NULL DEFAULT 0,
+   sent_at INTEGER NOT NULL,
++  contact_jid TEXT,
+   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+ );
+ 
+ CREATE INDEX IF NOT EXISTS idx_conv_log_session ON conversation_log(session_id);
++CREATE INDEX IF NOT EXISTS idx_conv_log_contact ON conversation_log(contact_jid);
++
++-- Multi-contact bot targets. Each row = one contact that the bot may reply to,
++-- with its own enable/disable flag and optional custom prompt.
++CREATE TABLE IF NOT EXISTS bot_targets (
++  session_id INTEGER NOT NULL,
++  contact_jid TEXT NOT NULL,
++  contact_name TEXT NOT NULL,
++  enabled INTEGER NOT NULL DEFAULT 0,
++  custom_prompt TEXT,
++  created_at INTEGER NOT NULL,
++  PRIMARY KEY (session_id, contact_jid),
++  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
++);
++
++-- Key/value runtime settings (UI-editable).
++CREATE TABLE IF NOT EXISTS settings (
++  key TEXT PRIMARY KEY,
++  value TEXT NOT NULL,
++  updated_at INTEGER NOT NULL
++);
+ `;
+ 
++/** Lightweight column migrations for existing DBs. */
++function ensureColumn(table: string, column: string, decl: string): void {
++  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
++  if (!cols.some((c) => c.name === column)) {
++    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
++    logger.info('schema: added column %s.%s', table, column);
++  }
++}
++
+ export function migrate(): void {
+   db.exec(SCHEMA_SQL);
++  // Best-effort additive migrations for older DBs.
++  try {
++    ensureColumn('chat_messages', 'contact_jid', 'TEXT');
++    ensureColumn('conversation_log', 'contact_jid', 'TEXT');
++  } catch (err) {
++    logger.warn('schema: column migration warning: %s', (err as Error).message);
++  }
+   logger.info('SQLite schema ensured at %s', config.DB_PATH);
+ }
+diff --git a/packages/backend/src/index.ts b/packages/backend/src/index.ts
+index c8daf2d..998dd57 100644
+--- a/packages/backend/src/index.ts
++++ b/packages/backend/src/index.ts
+@@ -14,6 +14,7 @@ import contactRoutes from './routes/contacts.js';
+ import uploadRoutes from './routes/upload.js';
+ import styleRoutes from './routes/style.js';
+ import botRoutes from './routes/bot.js';
++import settingsRoutes from './routes/settings.js';
+ 
+ async function main(): Promise<void> {
+   migrate();
+@@ -32,6 +33,7 @@ async function main(): Promise<void> {
+   app.use('/api/upload', uploadRoutes);
+   app.use('/api/style-profile', styleRoutes);
+   app.use('/api/bot', botRoutes);
++  app.use('/api/settings', settingsRoutes);
+ 
+   const server = http.createServer(app);
+ 
+diff --git a/packages/backend/src/modules/ai-engine.ts b/packages/backend/src/modules/ai-engine.ts
+index ff271b6..a125b61 100644
+--- a/packages/backend/src/modules/ai-engine.ts
++++ b/packages/backend/src/modules/ai-engine.ts
+@@ -6,44 +6,47 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google';
+ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+ import { config } from '../utils/config.js';
+ import { logger } from '../utils/logger.js';
+-import type { StyleProfile } from '../types/index.js';
++import { getMergedSettings } from '../db/repository.js';
++import type { RuntimeSettings, StyleProfile } from '../types/index.js';
+ 
+-function resolveModel(): LanguageModel {
+-  switch (config.LLM_PROVIDER) {
++function resolveModel(settings: RuntimeSettings): LanguageModel {
++  const provider = settings.llmProvider ?? config.LLM_PROVIDER;
++  const override = settings.llmModel?.trim();
++  switch (provider) {
+     case 'anthropic': {
+       if (!config.ANTHROPIC_API_KEY) {
+         throw new Error('ANTHROPIC_API_KEY is not configured');
+       }
+       const anthropic = createAnthropic({ apiKey: config.ANTHROPIC_API_KEY });
+-      return anthropic(config.ANTHROPIC_MODEL) as unknown as LanguageModel;
++      return anthropic(override || config.ANTHROPIC_MODEL) as unknown as LanguageModel;
+     }
+     case 'openai': {
+       if (!config.OPENAI_API_KEY) {
+         throw new Error('OPENAI_API_KEY is not configured');
+       }
+       const openai = createOpenAI({ apiKey: config.OPENAI_API_KEY });
+-      return openai(config.OPENAI_MODEL) as unknown as LanguageModel;
++      return openai(override || config.OPENAI_MODEL) as unknown as LanguageModel;
+     }
+     case 'ollama': {
+       const ollama = createOllama({ baseURL: `${config.OLLAMA_BASE_URL}/api` });
+-      return ollama(config.OLLAMA_MODEL) as unknown as LanguageModel;
++      return ollama(override || config.OLLAMA_MODEL) as unknown as LanguageModel;
+     }
+     case 'openrouter': {
+       if (!config.OPENROUTER_API_KEY) {
+         throw new Error('OPENROUTER_API_KEY is not configured');
+       }
+       const openrouter = createOpenRouter({ apiKey: config.OPENROUTER_API_KEY });
+-      return openrouter(config.OPENROUTER_MODEL) as LanguageModel;
++      return openrouter(override || config.OPENROUTER_MODEL) as LanguageModel;
+     }
+     case 'gemini': {
+       if (!config.GEMINI_API_KEY) {
+         throw new Error('GEMINI_API_KEY is not configured');
+       }
+       const google = createGoogleGenerativeAI({ apiKey: config.GEMINI_API_KEY });
+-      return google(config.GEMINI_MODEL) as unknown as LanguageModel;
++      return google(override || config.GEMINI_MODEL) as unknown as LanguageModel;
+     }
+     default: {
+-      const _exhaustive: never = config.LLM_PROVIDER;
++      const _exhaustive: never = provider;
+       throw new Error(`Unsupported LLM provider: ${_exhaustive as string}`);
+     }
+   }
+@@ -57,9 +60,11 @@ export interface AiReplyInput {
+    * message from the contact should be last.
+    */
+   history: Array<{ role: 'user' | 'assistant'; content: string }>;
++  /** Per-contact override prompt (highest priority). */
++  customPrompt?: string | null;
+ }
+ 
+-function buildSystemPrompt(input: AiReplyInput): string {
++function buildSystemPrompt(input: AiReplyInput, settings: RuntimeSettings): string {
+   const { contactName, styleProfile: s } = input;
+   const emojis = s.topEmojis.length ? s.topEmojis.join(' ') : '(none)';
+   const phrases = s.topPhrases.length
+@@ -71,55 +76,86 @@ function buildSystemPrompt(input: AiReplyInput): string {
+     .map(([p, n]) => `${p}(${n})`)
+     .join(', ');
+   const hours = s.activeHours.length ? s.activeHours.join(', ') : '(any)';
++  const language = settings.languageOverride?.trim() || s.language;
+ 
+-  return [
++  const baseLines = [
+     `You are mimicking the WhatsApp messaging style of "${contactName}".`,
+     `Stay in character at all times. Reply ONLY with the message text — no quotes, no narration, no role labels.`,
+     '',
+     'STYLE FINGERPRINT:',
+     `- Average message length: ${s.avgMsgLength} characters`,
+-    `- Emoji density: ${(s.emojiRatio * 100).toFixed(2)}% of characters`,
++    `- Emoji density: ${(s.emojiRatio * 100).toFixed(2)}% of characters` +
++      (settings.emojiBoost ? ` (UI boost: ${settings.emojiBoost > 0 ? '+' : ''}${settings.emojiBoost})` : ''),
+     `- Favourite emojis: ${emojis}`,
+     `- Capitalization pattern: ${s.capitalization}`,
+     `- Punctuation habits (most used): ${punct || '(minimal)'}`,
+     `- Frequent words / phrases: ${phrases}`,
+     `- Burst pattern: ${s.burstPattern} (avg ${s.avgBurstCount} messages per burst)`,
+     `- Typically active hours (24h): ${hours}`,
+-    `- Language: ${s.language}`,
++    `- Language: ${language}`,
++    `- Style strictness: ${(settings.styleStrictness * 100).toFixed(0)}% (higher = stick closer to the fingerprint)`,
+     '',
+     'RULES:',
+     '1. Match the length, tone, slang, and punctuation of the fingerprint.',
+-    '2. Use the favourite emojis sparingly but naturally — never every message.',
+-    "3. If the burst pattern is 'burst', you may reply with several short messages separated by `\\n\\n`.",
+-    "   Otherwise reply with ONE message.",
++    settings.emojiBoost > 0
++      ? '2. Use the favourite emojis a little more often than the baseline.'
++      : settings.emojiBoost < 0
++        ? '2. Use the favourite emojis less than the baseline — keep replies cleaner.'
++        : '2. Use the favourite emojis sparingly but naturally — never every message.',
++    settings.burstSplitEnabled
++      ? "3. If the burst pattern is 'burst', you may reply with several short messages separated by `\\n\\n`."
++      : '3. Always reply with ONE message even when bursting would be natural.',
++    '   Otherwise reply with ONE message.',
+     '4. Never reveal that you are an AI. Never break character.',
+     '5. Keep replies grounded in the conversation context above.',
+-  ].join('\n');
++  ];
++
++  const globalPrompt = settings.globalSystemPrompt?.trim();
++  if (globalPrompt) {
++    baseLines.push('', 'GLOBAL OVERRIDES (apply to every contact):', globalPrompt);
++  }
++
++  const contactPrompt = input.customPrompt?.trim();
++  if (contactPrompt) {
++    baseLines.push(
++      '',
++      `CONTACT-SPECIFIC OVERRIDES (for "${contactName}", highest priority):`,
++      contactPrompt,
++    );
++  }
++
++  return baseLines.join('\n');
+ }
+ 
+ export async function generateReply(input: AiReplyInput): Promise<string[]> {
+-  const model = resolveModel();
+-  const systemPrompt = buildSystemPrompt(input);
++  const settings = getMergedSettings();
++  const model = resolveModel(settings);
++  const systemPrompt = buildSystemPrompt(input, settings);
+ 
+-  const messages: CoreMessage[] = input.history.slice(-config.CONTEXT_WINDOW).map((m) => ({
++  const ctx = Math.max(1, Math.min(settings.contextWindow, 200));
++  const messages: CoreMessage[] = input.history.slice(-ctx).map((m) => ({
+     role: m.role,
+     content: m.content,
+   }));
+ 
+-  logger.debug('ai-engine: requesting reply (provider=%s)', config.LLM_PROVIDER);
++  logger.debug('ai-engine: requesting reply (provider=%s)', settings.llmProvider);
+ 
+   const { text } = await generateText({
+     model,
+     system: systemPrompt,
+     messages,
+-    maxTokens: config.MAX_TOKENS,
+-    temperature: 0.8,
++    maxTokens: Math.max(16, Math.min(settings.maxTokens, 4096)),
++    temperature: Math.max(0, Math.min(settings.temperature, 2)),
+   });
+ 
+   const trimmed = text.trim();
+   if (!trimmed) return [];
+ 
+-  if (input.styleProfile.burstPattern === 'burst' && trimmed.includes('\n\n')) {
++  if (
++    settings.burstSplitEnabled &&
++    input.styleProfile.burstPattern === 'burst' &&
++    trimmed.includes('\n\n')
++  ) {
+     return trimmed
+       .split(/\n{2,}/)
+       .map((s) => s.trim())
+diff --git a/packages/backend/src/modules/message-router.ts b/packages/backend/src/modules/message-router.ts
+index fb2b5e0..35bf046 100644
+--- a/packages/backend/src/modules/message-router.ts
++++ b/packages/backend/src/modules/message-router.ts
+@@ -1,16 +1,21 @@
+ import { EventEmitter } from 'node:events';
+-import { config } from '../utils/config.js';
+ import { logger } from '../utils/logger.js';
+ import { randomInt, sleep } from '../utils/random.js';
+ import { whatsappClient, type IncomingMessageEvent } from './whatsapp-client.js';
+ import { generateReply } from './ai-engine.js';
+ import {
+-  getActiveTarget,
++  countRecentOutbound,
++  getBotTarget,
++  getMergedSettings,
+   getStyleProfile,
++  listBotTargets,
+   logConversation,
+   recentConversation,
+ } from '../db/repository.js';
+-import type { ConversationLogEntry } from '../types/index.js';
++import type {
++  ConversationLogEntry,
++  RuntimeSettings,
++} from '../types/index.js';
+ 
+ export type RouterEvents = {
+   log: [entry: ConversationLogEntry];
+@@ -18,6 +23,10 @@ export type RouterEvents = {
+ };
+ 
+ class MessageRouter extends EventEmitter<RouterEvents> {
++  /**
++   * Global master switch. When false, the bot never replies — regardless of
++   * per-contact toggles. (Backward-compat with the original /api/bot/toggle.)
++   */
+   private enabled = false;
+   private sessionId: number | null = null;
+   private inflightJids = new Set<string>();
+@@ -32,7 +41,7 @@ class MessageRouter extends EventEmitter<RouterEvents> {
+ 
+   setEnabled(value: boolean): void {
+     this.enabled = value;
+-    logger.info('message-router: bot %s', value ? 'ENABLED' : 'DISABLED');
++    logger.info('message-router: global bot %s', value ? 'ENABLED' : 'DISABLED');
+   }
+ 
+   attach(): void {
+@@ -44,16 +53,94 @@ class MessageRouter extends EventEmitter<RouterEvents> {
+     });
+   }
+ 
++  /** True when the message passes all configured filters / schedule checks. */
++  private passesFilters(
++    event: IncomingMessageEvent,
++    settings: RuntimeSettings,
++  ): { ok: true } | { ok: false; reason: string } {
++    if (settings.doNotDisturb) return { ok: false, reason: 'do-not-disturb' };
++
++    if (event.jid.endsWith('@g.us') && !settings.replyToGroups) {
++      return { ok: false, reason: 'group-disabled' };
++    }
++
++    const text = event.text;
++    if (settings.ignoreRegex.trim()) {
++      try {
++        const re = new RegExp(settings.ignoreRegex, 'i');
++        if (re.test(text)) return { ok: false, reason: 'ignore-regex' };
++      } catch {
++        // Invalid regex — ignore the rule, don't block messages.
++      }
++    }
++
++    const ignored = settings.ignoredKeywords
++      .split(',')
++      .map((s) => s.trim().toLowerCase())
++      .filter(Boolean);
++    if (ignored.length && ignored.some((kw) => text.toLowerCase().includes(kw))) {
++      return { ok: false, reason: 'ignored-keyword' };
++    }
++
++    const allowed = settings.allowedKeywords
++      .split(',')
++      .map((s) => s.trim().toLowerCase())
++      .filter(Boolean);
++    if (allowed.length && !allowed.some((kw) => text.toLowerCase().includes(kw))) {
++      return { ok: false, reason: 'allowed-keyword-missing' };
++    }
++
++    // Schedule check (24h window, with timezone offset)
++    const tzOffsetMs = settings.timezoneOffset * 60_000;
++    const local = new Date(Date.now() + tzOffsetMs);
++    const hour = local.getUTCHours();
++    const dow = local.getUTCDay(); // 0=Sun, 6=Sat
++    if (!settings.weekendEnabled && (dow === 0 || dow === 6)) {
++      return { ok: false, reason: 'weekend-disabled' };
++    }
++    const { activeHoursStart: s, activeHoursEnd: e } = settings;
++    const inWindow =
++      s <= e ? hour >= s && hour <= e : hour >= s || hour <= e;
++    if (!inWindow) return { ok: false, reason: 'outside-active-hours' };
++
++    return { ok: true };
++  }
++
+   private async handleIncoming(event: IncomingMessageEvent): Promise<void> {
+     if (event.fromMe) return;
+     if (!this.enabled) return;
+     if (this.sessionId == null) return;
+ 
+-    const target = getActiveTarget(this.sessionId);
+-    if (!target) return;
+-    if (event.jid !== target.contactJid) return;
++    const settings = getMergedSettings();
++
++    // Multi-contact mode: only reply if the contact has an enabled target row.
++    const target = getBotTarget(this.sessionId, event.jid);
++    if (!target) {
++      if (!settings.replyToUnknown) return;
++    } else if (!target.enabled) {
++      return;
++    }
++
++    const filter = this.passesFilters(event, settings);
++    if (!filter.ok) {
++      logger.debug('message-router: skipping (%s) for %s', filter.reason, event.jid);
++      return;
++    }
++
++    // Rate-limit
++    if (settings.rateLimitEnabled) {
++      const sinceMs = Date.now() - 60 * 60 * 1000;
++      const outbound = countRecentOutbound(this.sessionId, sinceMs);
++      if (outbound >= settings.maxRepliesPerHour) {
++        logger.warn(
++          'message-router: rate-limit hit (%d/h) for %s',
++          settings.maxRepliesPerHour,
++          event.jid,
++        );
++        return;
++      }
++    }
+ 
+-    // Single-flight per contact to avoid overlapping LLM calls.
+     if (this.inflightJids.has(event.jid)) {
+       logger.debug('message-router: already replying to %s, skipping', event.jid);
+       return;
+@@ -61,16 +148,26 @@ class MessageRouter extends EventEmitter<RouterEvents> {
+     this.inflightJids.add(event.jid);
+ 
+     try {
+-      const inboundEntry = logConversation(this.sessionId, 'in', event.text, false);
++      const inboundEntry = logConversation(
++        this.sessionId,
++        'in',
++        event.text,
++        false,
++        event.jid,
++      );
+       this.emit('log', inboundEntry);
+ 
+-      const profile = getStyleProfile(this.sessionId);
++      const profile = getStyleProfile(this.sessionId, event.jid);
+       if (!profile) {
+-        logger.warn('message-router: no style profile yet, skipping reply');
++        logger.warn('message-router: no style profile yet for %s, skipping reply', event.jid);
+         return;
+       }
+ 
+-      const history = recentConversation(this.sessionId, config.CONTEXT_WINDOW)
++      const history = recentConversation(
++        this.sessionId,
++        settings.contextWindow,
++        event.jid,
++      )
+         .slice()
+         .reverse()
+         .map((entry) => ({
+@@ -78,10 +175,12 @@ class MessageRouter extends EventEmitter<RouterEvents> {
+           content: entry.content,
+         }));
+ 
++      const contactName = target?.contactName ?? event.pushName ?? event.jid;
+       const replies = await generateReply({
+-        contactName: target.contactName,
++        contactName,
+         styleProfile: profile,
+         history,
++        customPrompt: target?.customPrompt ?? null,
+       });
+ 
+       if (replies.length === 0) {
+@@ -90,13 +189,26 @@ class MessageRouter extends EventEmitter<RouterEvents> {
+       }
+ 
+       for (const reply of replies) {
+-        const delay = randomInt(config.REPLY_DELAY_MIN, config.REPLY_DELAY_MAX);
+-        await whatsappClient.sendPresenceTyping(target.contactJid);
++        let delay = randomInt(settings.replyDelayMin, settings.replyDelayMax);
++        if (settings.antiBanJitter) {
++          delay += randomInt(0, Math.max(500, Math.floor(delay * 0.25)));
++        }
++        if (settings.typingIndicator) {
++          await whatsappClient.sendPresenceTyping(event.jid);
++        }
+         await sleep(delay);
+-        await whatsappClient.sendText(target.contactJid, reply);
+-        await whatsappClient.sendPresencePaused(target.contactJid);
+-
+-        const outEntry = logConversation(this.sessionId, 'out', reply, true);
++        await whatsappClient.sendText(event.jid, reply);
++        if (settings.typingIndicator) {
++          await whatsappClient.sendPresencePaused(event.jid);
++        }
++
++        const outEntry = logConversation(
++          this.sessionId,
++          'out',
++          reply,
++          true,
++          event.jid,
++        );
+         this.emit('log', outEntry);
+       }
+     } finally {
+diff --git a/packages/backend/src/modules/style-analyzer.ts b/packages/backend/src/modules/style-analyzer.ts
+index a0d5f10..c220217 100644
+--- a/packages/backend/src/modules/style-analyzer.ts
++++ b/packages/backend/src/modules/style-analyzer.ts
+@@ -89,6 +89,8 @@ function topN<T>(items: T[], n: number): T[] {
+ export interface AnalyseOptions {
+   /** Only analyse messages from this sender (case-insensitive). If omitted, every sender is used. */
+   targetSender?: string;
++  /** Contact JID this profile is bound to (multi-contact mode). Defaults to '__default__'. */
++  contactJid?: string;
+ }
+ 
+ export function analyseStyle(
+@@ -105,6 +107,7 @@ export function analyseStyle(
+   if (filtered.length === 0) {
+     return {
+       sessionId,
++      contactJid: options.contactJid ?? '__default__',
+       avgMsgLength: 0,
+       emojiRatio: 0,
+       topEmojis: [],
+@@ -171,6 +174,7 @@ export function analyseStyle(
+ 
+   return {
+     sessionId,
++    contactJid: options.contactJid ?? '__default__',
+     avgMsgLength,
+     emojiRatio,
+     topEmojis,
+diff --git a/packages/backend/src/routes/bot.ts b/packages/backend/src/routes/bot.ts
+index aaff6fc..91e9d4f 100644
+--- a/packages/backend/src/routes/bot.ts
++++ b/packages/backend/src/routes/bot.ts
+@@ -24,7 +24,8 @@ router.post('/toggle', (req, res) => {
+ router.get('/logs', (req, res) => {
+   const sessionId = getOrCreateSession(null);
+   const limit = Math.min(Number(req.query.limit ?? 100), 500);
+-  res.json({ logs: recentConversation(sessionId, limit) });
++  const jid = typeof req.query.jid === 'string' ? req.query.jid : null;
++  res.json({ logs: recentConversation(sessionId, limit, jid) });
+ });
+ 
+ export default router;
+diff --git a/packages/backend/src/routes/contacts.ts b/packages/backend/src/routes/contacts.ts
+index 56003b1..7b6a829 100644
+--- a/packages/backend/src/routes/contacts.ts
++++ b/packages/backend/src/routes/contacts.ts
+@@ -3,9 +3,15 @@ import { z } from 'zod';
+ import { whatsappClient } from '../modules/whatsapp-client.js';
+ import {
+   clearActiveTarget,
++  deleteBotTarget,
+   getActiveTarget,
+   getOrCreateSession,
++  listBotTargets,
+   setActiveTarget,
++  setAllBotTargetsEnabled,
++  setBotTargetEnabled,
++  setBotTargetPrompt,
++  upsertBotTarget,
+ } from '../db/repository.js';
+ 
+ const router = Router();
+@@ -44,4 +50,83 @@ router.delete('/active', (_req, res) => {
+   res.json({ ok: true });
+ });
+ 
++// ----------------------------------------------------------------------
++// Multi-target endpoints
++// ----------------------------------------------------------------------
++
++router.get('/targets', (_req, res) => {
++  const sessionId = getOrCreateSession(null);
++  res.json({ targets: listBotTargets(sessionId) });
++});
++
++const AddTargetSchema = z.object({
++  jid: z.string().min(1),
++  name: z.string().optional(),
++  enabled: z.boolean().optional(),
++  customPrompt: z.string().nullable().optional(),
++});
++
++router.post('/targets', (req, res) => {
++  const parsed = AddTargetSchema.safeParse(req.body);
++  if (!parsed.success) {
++    res.status(400).json({ error: parsed.error.flatten() });
++    return;
++  }
++  const sessionId = getOrCreateSession(null);
++  const all = whatsappClient.listContacts();
++  const matched = all.find((c) => c.jid === parsed.data.jid);
++  const name = parsed.data.name ?? matched?.name ?? parsed.data.jid.split('@')[0]!;
++  const target = upsertBotTarget(sessionId, parsed.data.jid, name);
++  if (parsed.data.enabled !== undefined) {
++    setBotTargetEnabled(sessionId, parsed.data.jid, parsed.data.enabled);
++  }
++  if (parsed.data.customPrompt !== undefined) {
++    setBotTargetPrompt(sessionId, parsed.data.jid, parsed.data.customPrompt);
++  }
++  res.json({ target });
++});
++
++router.delete('/targets/:jid', (req, res) => {
++  const sessionId = getOrCreateSession(null);
++  deleteBotTarget(sessionId, req.params.jid);
++  res.json({ ok: true });
++});
++
++const ToggleSchema = z.object({ enabled: z.boolean() });
++
++router.post('/targets/all/toggle', (req, res) => {
++  const parsed = ToggleSchema.safeParse(req.body);
++  if (!parsed.success) {
++    res.status(400).json({ error: parsed.error.flatten() });
++    return;
++  }
++  const sessionId = getOrCreateSession(null);
++  setAllBotTargetsEnabled(sessionId, parsed.data.enabled);
++  res.json({ targets: listBotTargets(sessionId) });
++});
++
++router.post('/targets/:jid/toggle', (req, res) => {
++  const parsed = ToggleSchema.safeParse(req.body);
++  if (!parsed.success) {
++    res.status(400).json({ error: parsed.error.flatten() });
++    return;
++  }
++  const sessionId = getOrCreateSession(null);
++  setBotTargetEnabled(sessionId, req.params.jid, parsed.data.enabled);
++  res.json({ targets: listBotTargets(sessionId) });
++});
++
++const PromptSchema = z.object({ customPrompt: z.string().max(4000).nullable() });
++
++router.put('/targets/:jid/prompt', (req, res) => {
++  const parsed = PromptSchema.safeParse(req.body);
++  if (!parsed.success) {
++    res.status(400).json({ error: parsed.error.flatten() });
++    return;
++  }
++  const sessionId = getOrCreateSession(null);
++  setBotTargetPrompt(sessionId, req.params.jid, parsed.data.customPrompt);
++  res.json({ targets: listBotTargets(sessionId) });
++});
++
+ export default router;
+diff --git a/packages/backend/src/routes/settings.ts b/packages/backend/src/routes/settings.ts
+new file mode 100644
+index 0000000..df290ad
+--- /dev/null
++++ b/packages/backend/src/routes/settings.ts
+@@ -0,0 +1,79 @@
++import { Router } from 'express';
++import { z } from 'zod';
++import {
++  getMergedSettings,
++  resetSettings,
++  saveSettings,
++} from '../db/repository.js';
++import { DEFAULT_SETTINGS, type RuntimeSettings } from '../types/index.js';
++
++const router = Router();
++
++const SettingsSchema = z.object({
++  llmProvider: z.enum(['anthropic', 'openai', 'ollama', 'openrouter', 'gemini']).optional(),
++  llmModel: z.string().max(200).optional(),
++  temperature: z.number().min(0).max(2).optional(),
++  maxTokens: z.number().int().min(16).max(4096).optional(),
++  contextWindow: z.number().int().min(1).max(200).optional(),
++
++  replyDelayMin: z.number().int().min(0).max(120_000).optional(),
++  replyDelayMax: z.number().int().min(0).max(120_000).optional(),
++  typingIndicator: z.boolean().optional(),
++  burstSplitEnabled: z.boolean().optional(),
++  antiBanJitter: z.boolean().optional(),
++
++  replyToGroups: z.boolean().optional(),
++  replyToUnknown: z.boolean().optional(),
++  ignoreRegex: z.string().max(500).optional(),
++  allowedKeywords: z.string().max(1000).optional(),
++  ignoredKeywords: z.string().max(1000).optional(),
++
++  activeHoursStart: z.number().int().min(0).max(23).optional(),
++  activeHoursEnd: z.number().int().min(0).max(23).optional(),
++  weekendEnabled: z.boolean().optional(),
++  timezoneOffset: z.number().int().min(-720).max(840).optional(),
++
++  emojiBoost: z.number().min(-1).max(1).optional(),
++  styleStrictness: z.number().min(0).max(1).optional(),
++  languageOverride: z.string().max(20).optional(),
++
++  maxRepliesPerHour: z.number().int().min(1).max(10_000).optional(),
++  rateLimitEnabled: z.boolean().optional(),
++  doNotDisturb: z.boolean().optional(),
++
++  readReceipts: z.boolean().optional(),
++  logRetentionDays: z.number().int().min(1).max(3650).optional(),
++  globalSystemPrompt: z.string().max(4000).optional(),
++});
++
++router.get('/', (_req, res) => {
++  res.json({
++    settings: getMergedSettings(),
++    defaults: DEFAULT_SETTINGS,
++  });
++});
++
++router.put('/', (req, res) => {
++  const parsed = SettingsSchema.safeParse(req.body);
++  if (!parsed.success) {
++    res.status(400).json({ error: parsed.error.flatten() });
++    return;
++  }
++  // Validate min <= max for delay window.
++  const merged: RuntimeSettings = { ...getMergedSettings(), ...parsed.data };
++  if (merged.replyDelayMin > merged.replyDelayMax) {
++    res.status(400).json({
++      error: { fieldErrors: { replyDelayMin: ['must be ≤ replyDelayMax'] } },
++    });
++    return;
++  }
++  saveSettings(parsed.data);
++  res.json({ settings: getMergedSettings() });
++});
++
++router.post('/reset', (_req, res) => {
++  resetSettings();
++  res.json({ settings: getMergedSettings() });
++});
++
++export default router;
+diff --git a/packages/backend/src/routes/style.ts b/packages/backend/src/routes/style.ts
+index 13a5ea6..dea0162 100644
+--- a/packages/backend/src/routes/style.ts
++++ b/packages/backend/src/routes/style.ts
+@@ -3,11 +3,16 @@ import { getOrCreateSession, getStyleProfile } from '../db/repository.js';
+ 
+ const router = Router();
+ 
+-router.get('/', (_req, res) => {
++router.get('/', (req, res) => {
+   const sessionId = getOrCreateSession(null);
+-  const profile = getStyleProfile(sessionId);
++  const jid = typeof req.query.jid === 'string' ? req.query.jid : null;
++  const profile = getStyleProfile(sessionId, jid);
+   if (!profile) {
+-    res.status(404).json({ error: 'No style profile yet. Upload chat history first.' });
++    res.status(404).json({
++      error: jid
++        ? `No style profile yet for ${jid}. Upload chat history for this contact first.`
++        : 'No style profile yet. Upload chat history first.',
++    });
+     return;
+   }
+   res.json({ profile });
+diff --git a/packages/backend/src/routes/upload.ts b/packages/backend/src/routes/upload.ts
+index 9d18e23..a11a4a1 100644
+--- a/packages/backend/src/routes/upload.ts
++++ b/packages/backend/src/routes/upload.ts
+@@ -6,10 +6,13 @@ import {
+   bulkInsertChatMessages,
+   clearChatMessages,
+   getActiveTarget,
++  getBotTarget,
+   getOrCreateSession,
+   saveStyleProfile,
++  upsertBotTarget,
+ } from '../db/repository.js';
+ import { logger } from '../utils/logger.js';
++import { whatsappClient } from '../modules/whatsapp-client.js';
+ 
+ const upload = multer({
+   storage: multer.memoryStorage(),
+@@ -22,51 +25,96 @@ interface UploadState {
+   status: 'idle' | 'parsing' | 'done' | 'error';
+   totalMessages: number;
+   targetSender: string | null;
++  targetJid: string | null;
+   error?: string;
+   finishedAt?: number;
+ }
+ 
+-let lastUpload: UploadState = { status: 'idle', totalMessages: 0, targetSender: null };
++let lastUpload: UploadState = {
++  status: 'idle',
++  totalMessages: 0,
++  targetSender: null,
++  targetJid: null,
++};
+ 
+-router.post('/chat', upload.single('file'), (req, res) => {
++/**
++ * POST /api/upload/chat                — import for the legacy "active" target
++ * POST /api/upload/chat?jid=xxx        — import for a specific contact
++ * POST /api/upload/chat/:jid           — convenience path form
++ */
++function importHandler(req: import('express').Request, res: import('express').Response): void {
+   if (!req.file) {
+     res.status(400).json({ error: 'No file uploaded' });
+     return;
+   }
+   const sessionId = getOrCreateSession(null);
+-  const active = getActiveTarget(sessionId);
+-  if (!active) {
+-    res.status(400).json({ error: 'Select a target contact first' });
+-    return;
++
++  // Resolve the contact this import belongs to.
++  const explicitJid =
++    (req.params.jid as string | undefined) ??
++    (typeof req.query.jid === 'string' ? req.query.jid : undefined);
++
++  let contactJid: string;
++  let contactName: string;
++
++  if (explicitJid) {
++    contactJid = explicitJid;
++    const known = whatsappClient.listContacts().find((c) => c.jid === explicitJid);
++    const existingTarget = getBotTarget(sessionId, explicitJid);
++    contactName =
++      existingTarget?.contactName ?? known?.name ?? explicitJid.split('@')[0]!;
++    // Make sure a target row exists so the user can toggle this contact on.
++    upsertBotTarget(sessionId, contactJid, contactName);
++  } else {
++    const active = getActiveTarget(sessionId);
++    if (!active) {
++      res.status(400).json({ error: 'Select a target contact first' });
++      return;
++    }
++    contactJid = active.contactJid;
++    contactName = active.contactName;
+   }
+ 
+-  lastUpload = { status: 'parsing', totalMessages: 0, targetSender: active.contactName };
++  lastUpload = {
++    status: 'parsing',
++    totalMessages: 0,
++    targetSender: contactName,
++    targetJid: contactJid,
++  };
+   try {
+     const messages = parseChatBuffer(req.file.originalname, req.file.buffer);
+-    clearChatMessages(sessionId);
+-    const inserted = bulkInsertChatMessages(sessionId, messages);
+-    const profile = analyseStyle(sessionId, messages, { targetSender: active.contactName });
++    clearChatMessages(sessionId, contactJid);
++    const inserted = bulkInsertChatMessages(sessionId, messages, contactJid);
++    const profile = analyseStyle(sessionId, messages, {
++      targetSender: contactName,
++      contactJid,
++    });
+     saveStyleProfile(profile);
+     lastUpload = {
+       status: 'done',
+       totalMessages: inserted,
+-      targetSender: active.contactName,
++      targetSender: contactName,
++      targetJid: contactJid,
+       finishedAt: Date.now(),
+     };
+-    res.json({ inserted, profile });
++    res.json({ inserted, profile, contactJid });
+   } catch (err) {
+     const message = err instanceof Error ? err.message : String(err);
+     logger.error('upload: parse failed', err);
+     lastUpload = {
+       status: 'error',
+       totalMessages: 0,
+-      targetSender: active.contactName,
++      targetSender: contactName,
++      targetJid: contactJid,
+       error: message,
+       finishedAt: Date.now(),
+     };
+     res.status(400).json({ error: message });
+   }
+-});
++}
++
++router.post('/chat', upload.single('file'), importHandler);
++router.post('/chat/:jid', upload.single('file'), importHandler);
+ 
+ router.get('/status', (_req, res) => {
+   res.json(lastUpload);
+diff --git a/packages/backend/src/types/index.ts b/packages/backend/src/types/index.ts
+index 1789485..664a9b5 100644
+--- a/packages/backend/src/types/index.ts
++++ b/packages/backend/src/types/index.ts
+@@ -6,6 +6,7 @@ export interface ParsedMessage {
+ 
+ export interface StyleProfile {
+   sessionId: number;
++  contactJid: string;
+   avgMsgLength: number;
+   emojiRatio: number;
+   topEmojis: string[];
+@@ -38,6 +39,15 @@ export interface ActiveTarget {
+   setAt: number;
+ }
+ 
++export interface BotTarget {
++  sessionId: number;
++  contactJid: string;
++  contactName: string;
++  enabled: boolean;
++  customPrompt: string | null;
++  createdAt: number;
++}
++
+ export interface ConversationLogEntry {
+   id: number;
+   sessionId: number;
+@@ -45,4 +55,75 @@ export interface ConversationLogEntry {
+   content: string;
+   aiGenerated: boolean;
+   sentAt: number;
++  contactJid: string | null;
++}
++
++/** UI-editable runtime settings. All optional — falls back to env / defaults. */
++export interface RuntimeSettings {
++  // ---- LLM ----
++  llmProvider: 'anthropic' | 'openai' | 'ollama' | 'openrouter' | 'gemini';
++  llmModel: string;          // override the provider-specific model name
++  temperature: number;       // 0 - 2
++  maxTokens: number;         // 1 - 4096
++  contextWindow: number;     // # of recent messages
++  // ---- Reply behaviour ----
++  replyDelayMin: number;     // ms
++  replyDelayMax: number;     // ms
++  typingIndicator: boolean;
++  burstSplitEnabled: boolean;
++  antiBanJitter: boolean;    // adds extra random jitter
++  // ---- Filters ----
++  replyToGroups: boolean;
++  replyToUnknown: boolean;
++  ignoreRegex: string;       // skip messages matching this regex
++  allowedKeywords: string;   // comma-separated, if non-empty only reply when present
++  ignoredKeywords: string;   // comma-separated, skip when present
++  // ---- Schedule ----
++  activeHoursStart: number;  // 0 - 23
++  activeHoursEnd: number;    // 0 - 23 (wraps if end<start)
++  weekendEnabled: boolean;
++  timezoneOffset: number;    // minutes from UTC, -720 .. +840
++  // ---- Style overrides ----
++  emojiBoost: number;        // -1 .. +1 (decrease/increase emoji density)
++  styleStrictness: number;   // 0 .. 1
++  languageOverride: string;  // '' = auto
++  // ---- Safety / limits ----
++  maxRepliesPerHour: number;
++  rateLimitEnabled: boolean;
++  doNotDisturb: boolean;     // hard kill-switch
++  // ---- Misc ----
++  readReceipts: boolean;
++  logRetentionDays: number;
++  globalSystemPrompt: string; // applied to every contact unless overridden
+ }
++
++export const DEFAULT_SETTINGS: RuntimeSettings = {
++  llmProvider: 'anthropic',
++  llmModel: '',
++  temperature: 0.8,
++  maxTokens: 512,
++  contextWindow: 20,
++  replyDelayMin: 2000,
++  replyDelayMax: 8000,
++  typingIndicator: true,
++  burstSplitEnabled: true,
++  antiBanJitter: true,
++  replyToGroups: false,
++  replyToUnknown: false,
++  ignoreRegex: '',
++  allowedKeywords: '',
++  ignoredKeywords: '',
++  activeHoursStart: 0,
++  activeHoursEnd: 23,
++  weekendEnabled: true,
++  timezoneOffset: 0,
++  emojiBoost: 0,
++  styleStrictness: 0.7,
++  languageOverride: '',
++  maxRepliesPerHour: 60,
++  rateLimitEnabled: false,
++  doNotDisturb: false,
++  readReceipts: false,
++  logRetentionDays: 30,
++  globalSystemPrompt: '',
++};
+diff --git a/packages/frontend/src/lib/api.ts b/packages/frontend/src/lib/api.ts
+index 26df725..7bc8c1b 100644
+--- a/packages/frontend/src/lib/api.ts
++++ b/packages/frontend/src/lib/api.ts
+@@ -1,6 +1,8 @@
+ import type {
+   ActiveTarget,
++  BotTarget,
+   ConversationLogEntry,
++  RuntimeSettings,
+   StyleProfile,
+   WaConnectionStatus,
+   WaContactSummary,
+@@ -35,17 +37,57 @@ export const api = {
+   clearActive: () =>
+     fetch('/api/contacts/active', { method: 'DELETE' }).then(json<{ ok: true }>),
+ 
+-  uploadChat: (file: File) => {
++  // -------- multi-target --------
++  listTargets: () =>
++    fetch('/api/contacts/targets').then(json<{ targets: BotTarget[] }>),
++  addTarget: (
++    jid: string,
++    opts: { name?: string; enabled?: boolean; customPrompt?: string | null } = {},
++  ) =>
++    fetch('/api/contacts/targets', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ jid, ...opts }),
++    }).then(json<{ target: BotTarget }>),
++  removeTarget: (jid: string) =>
++    fetch(`/api/contacts/targets/${encodeURIComponent(jid)}`, {
++      method: 'DELETE',
++    }).then(json<{ ok: true }>),
++  toggleTarget: (jid: string, enabled: boolean) =>
++    fetch(`/api/contacts/targets/${encodeURIComponent(jid)}/toggle`, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ enabled }),
++    }).then(json<{ targets: BotTarget[] }>),
++  toggleAllTargets: (enabled: boolean) =>
++    fetch('/api/contacts/targets/all/toggle', {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ enabled }),
++    }).then(json<{ targets: BotTarget[] }>),
++  updateTargetPrompt: (jid: string, customPrompt: string | null) =>
++    fetch(`/api/contacts/targets/${encodeURIComponent(jid)}/prompt`, {
++      method: 'PUT',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ customPrompt }),
++    }).then(json<{ targets: BotTarget[] }>),
++
++  uploadChat: (file: File, jid?: string) => {
+     const form = new FormData();
+     form.append('file', file);
+-    return fetch('/api/upload/chat', { method: 'POST', body: form }).then(
+-      json<{ inserted: number; profile: StyleProfile }>,
++    const url = jid
++      ? `/api/upload/chat/${encodeURIComponent(jid)}`
++      : '/api/upload/chat';
++    return fetch(url, { method: 'POST', body: form }).then(
++      json<{ inserted: number; profile: StyleProfile; contactJid?: string }>,
+     );
+   },
+   uploadStatus: () => fetch('/api/upload/status').then(json<unknown>),
+ 
+-  styleProfile: () =>
+-    fetch('/api/style-profile').then(json<{ profile: StyleProfile }>),
++  styleProfile: (jid?: string) =>
++    fetch(jid ? `/api/style-profile?jid=${encodeURIComponent(jid)}` : '/api/style-profile').then(
++      json<{ profile: StyleProfile }>,
++    ),
+ 
+   botStatus: () => fetch('/api/bot/status').then(json<{ enabled: boolean }>),
+   botToggle: (enabled: boolean) =>
+@@ -54,8 +96,26 @@ export const api = {
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ enabled }),
+     }).then(json<{ enabled: boolean }>),
+-  logs: (limit = 100) =>
+-    fetch(`/api/bot/logs?limit=${limit}`).then(
+-      json<{ logs: ConversationLogEntry[] }>,
++  logs: (limit = 100, jid?: string) =>
++    fetch(
++      jid
++        ? `/api/bot/logs?limit=${limit}&jid=${encodeURIComponent(jid)}`
++        : `/api/bot/logs?limit=${limit}`,
++    ).then(json<{ logs: ConversationLogEntry[] }>),
++
++  // -------- settings --------
++  getSettings: () =>
++    fetch('/api/settings').then(
++      json<{ settings: RuntimeSettings; defaults: RuntimeSettings }>,
++    ),
++  updateSettings: (patch: Partial<RuntimeSettings>) =>
++    fetch('/api/settings', {
++      method: 'PUT',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify(patch),
++    }).then(json<{ settings: RuntimeSettings }>),
++  resetSettings: () =>
++    fetch('/api/settings/reset', { method: 'POST' }).then(
++      json<{ settings: RuntimeSettings }>,
+     ),
+ };
+diff --git a/packages/frontend/src/pages/BotControlPage.tsx b/packages/frontend/src/pages/BotControlPage.tsx
+index a09aeed..dce6dc0 100644
+--- a/packages/frontend/src/pages/BotControlPage.tsx
++++ b/packages/frontend/src/pages/BotControlPage.tsx
+@@ -1,15 +1,24 @@
+ import { useEffect, useState } from 'react';
++import { Link } from 'react-router-dom';
+ import { api } from '../lib/api';
+-import type { ActiveTarget } from '../types';
++import type { BotTarget } from '../types';
+ 
+ export default function BotControlPage() {
+   const [enabled, setEnabled] = useState(false);
+-  const [target, setTarget] = useState<ActiveTarget | null>(null);
++  const [targets, setTargets] = useState<BotTarget[]>([]);
+   const [busy, setBusy] = useState(false);
+ 
++  const refresh = async () => {
++    const [s, t] = await Promise.all([
++      api.botStatus().catch(() => ({ enabled: false })),
++      api.listTargets().catch(() => ({ targets: [] })),
++    ]);
++    setEnabled(s.enabled);
++    setTargets(t.targets);
++  };
++
+   useEffect(() => {
+-    api.botStatus().then((r) => setEnabled(r.enabled)).catch(() => undefined);
+-    api.activeContact().then((r) => setTarget(r.target)).catch(() => undefined);
++    refresh();
+   }, []);
+ 
+   const toggle = async () => {
+@@ -22,139 +31,138 @@ export default function BotControlPage() {
+     }
+   };
+ 
++  const enabledTargets = targets.filter((t) => t.enabled);
++  const canEnable = enabledTargets.length > 0;
++
+   return (
+-    <div className="animate-fade-in" style={{ maxWidth: 560 }}>
+-      {/* Header */}
++    <div className="animate-fade-in" style={{ maxWidth: 700 }}>
+       <div className="page-header">
+         <h2>Bot Control</h2>
+-        <p>Enable or disable the autonomous AI responder.</p>
++        <p>
++          Global master switch for the autonomous AI responder. Per-contact toggles live in the{' '}
++          <Link to="/contacts" style={{ color: 'var(--accent-blue)' }}>Contacts</Link> page.
++        </p>
+       </div>
+ 
+-      {/* Target Info */}
+-      <div className="glass" style={{
+-        padding: '20px 24px', borderRadius: 12, marginBottom: 24,
+-        display: 'flex', alignItems: 'center', gap: 16,
+-      }}>
++      {/* Target summary */}
++      <div className="glass" style={{ padding: 20, borderRadius: 12, marginBottom: 20 }}>
+         <div style={{
+-          width: 48, height: 48, borderRadius: 12,
+-          background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)',
+-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+-          color: 'var(--text-secondary)',
++          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
++          marginBottom: 12, gap: 12, flexWrap: 'wrap',
+         }}>
+-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+-            <circle cx="9" cy="7" r="4"/>
+-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+-          </svg>
+-        </div>
+-        <div>
+-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>
+-            Current Target
++          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
++            Target summary
+           </div>
+-          {target ? (
+-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>
+-              {target.contactName}
+-              <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400, fontFamily: 'Fira Code, monospace' }}>
+-                {target.contactJid}
+-              </span>
+-            </div>
+-          ) : (
+-            <div style={{ fontSize: 15, color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: 6 }}>
+-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+-                <line x1="12" y1="9" x2="12" y2="13"/>
+-                <line x1="12" y1="17" x2="12.01" y2="17"/>
+-              </svg>
+-              No contact selected
+-            </div>
+-          )}
++          <Link to="/contacts" className="btn-ghost" style={{
++            padding: '6px 12px', fontSize: 12, textDecoration: 'none',
++          }}>
++            Manage contacts →
++          </Link>
++        </div>
++
++        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
++          <Stat label="Total targets" value={targets.length} />
++          <Stat label="Auto-reply ON" value={enabledTargets.length} highlight={canEnable} />
++          <Stat label="With custom prompt" value={targets.filter((t) => t.customPrompt).length} />
+         </div>
++
++        {enabledTargets.length > 0 && (
++          <div style={{
++            marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)',
++            display: 'flex', gap: 6, flexWrap: 'wrap',
++          }}>
++            {enabledTargets.slice(0, 8).map((t) => (
++              <span key={t.contactJid} style={{
++                fontSize: 11, padding: '4px 8px', borderRadius: 99,
++                background: 'rgba(37,211,102,0.12)', color: 'var(--accent-green)',
++                border: '1px solid rgba(37,211,102,0.25)',
++              }}>
++                {t.contactName}{t.customPrompt ? ' ✨' : ''}
++              </span>
++            ))}
++            {enabledTargets.length > 8 && (
++              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
++                +{enabledTargets.length - 8} more
++              </span>
++            )}
++          </div>
++        )}
+       </div>
+ 
+-      {/* Main Control Panel */}
++      {/* Main switch */}
+       <div style={{
+-        padding: 32, borderRadius: 16,
++        padding: 28, borderRadius: 16,
+         background: enabled ? 'rgba(37,211,102,0.08)' : 'var(--bg-card)',
+-        border: '1px solid',
+-        borderColor: enabled ? 'rgba(37,211,102,0.3)' : 'var(--border)',
++        border: `1px solid ${enabled ? 'rgba(37,211,102,0.3)' : 'var(--border)'}`,
+         boxShadow: enabled ? '0 0 40px rgba(37,211,102,0.1)' : 'none',
+         transition: 'all 300ms ease',
+         textAlign: 'center',
+       }}>
+-        {/* Big icon */}
+         <div style={{
+-          width: 80, height: 80, borderRadius: '50%', margin: '0 auto 24px',
++          width: 72, height: 72, borderRadius: '50%', margin: '0 auto 16px',
+           background: enabled ? 'var(--accent-green)' : 'rgba(255,255,255,0.05)',
+           color: enabled ? '#000' : 'var(--text-muted)',
+           display: 'flex', alignItems: 'center', justifyContent: 'center',
+           boxShadow: enabled ? '0 0 30px var(--accent-green-glow)' : 'none',
+           transition: 'all 300ms ease',
++          fontSize: 32,
+         }}>
+-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-            <rect x="3" y="11" width="18" height="11" rx="2"/>
+-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+-            <line x1="8" y1="16" x2="8.01" y2="16" strokeWidth="3"/>
+-            <line x1="16" y1="16" x2="16.01" y2="16" strokeWidth="3"/>
+-          </svg>
++          {enabled ? '⚡' : '⏸'}
+         </div>
+ 
+-        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
+-          Auto-Responder is {enabled ? <span style={{ color: 'var(--accent-green)' }}>ON</span> : <span style={{ color: 'var(--text-muted)' }}>OFF</span>}
++        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
++          Auto-Responder is{' '}
++          {enabled
++            ? <span style={{ color: 'var(--accent-green)' }}>ON</span>
++            : <span style={{ color: 'var(--text-muted)' }}>OFF</span>}
+         </div>
+-        <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 32, maxWidth: 400, margin: '0 auto 32px' }}>
+-          {enabled 
+-            ? 'The AI is actively reading incoming messages and responding autonomously.' 
+-            : 'The AI is currently paused. Messages will be ignored until enabled.'}
++        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 24 }}>
++          {enabled
++            ? `Replying autonomously to ${enabledTargets.length} enabled contact${enabledTargets.length === 1 ? '' : 's'}.`
++            : 'The AI is paused globally. Per-contact toggles are ignored until you enable the master switch.'}
+         </p>
+ 
+         <button
+           onClick={toggle}
+-          disabled={busy || !target}
++          disabled={busy || (!enabled && !canEnable)}
+           className={enabled ? 'btn-danger' : 'btn-primary'}
+-          style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 16 }}
++          style={{ minWidth: 220, justifyContent: 'center', padding: '12px', fontSize: 14 }}
+         >
+-          {busy ? (
+-            <svg className="animate-spin-slow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-              <line x1="12" y1="2" x2="12" y2="6"/>
+-              <line x1="12" y1="18" x2="12" y2="22"/>
+-              <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/>
+-              <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+-              <line x1="2" y1="12" x2="6" y2="12"/>
+-              <line x1="18" y1="12" x2="22" y2="12"/>
+-              <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/>
+-              <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+-            </svg>
+-          ) : enabled ? (
+-            <>
+-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+-                <line x1="9" y1="9" x2="15" y2="15"/>
+-                <line x1="15" y1="9" x2="9" y2="15"/>
+-              </svg>
+-              Disable Auto-Responder
+-            </>
+-          ) : (
+-            <>
+-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-                <polygon points="5 3 19 12 5 21 5 3"/>
+-              </svg>
+-              Enable Auto-Responder
+-            </>
+-          )}
++          {busy
++            ? 'Working…'
++            : enabled
++              ? 'Disable globally'
++              : 'Enable globally'}
+         </button>
+ 
+-        {!target && (
+-          <div className="alert-warning" style={{ marginTop: 20, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}>
+-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+-              <line x1="12" y1="9" x2="12" y2="13"/>
+-              <line x1="12" y1="17" x2="12.01" y2="17"/>
+-            </svg>
+-            You must select a target contact before enabling the bot.
++        {!canEnable && !enabled && (
++          <div className="alert-warning" style={{ marginTop: 16, textAlign: 'left', fontSize: 12 }}>
++            Add at least one enabled target on the Contacts page before turning the bot on.
+           </div>
+         )}
+       </div>
+     </div>
+   );
+ }
++
++function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
++  return (
++    <div style={{
++      padding: 12, borderRadius: 10,
++      background: 'rgba(0,0,0,0.18)', border: '1px solid var(--border)',
++    }}>
++      <div style={{
++        fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
++        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4,
++      }}>
++        {label}
++      </div>
++      <div style={{
++        fontSize: 22, fontWeight: 700,
++        color: highlight ? 'var(--accent-green)' : 'var(--text-primary)',
++      }}>
++        {value}
++      </div>
++    </div>
++  );
++}
+diff --git a/packages/frontend/src/pages/ContactsPage.tsx b/packages/frontend/src/pages/ContactsPage.tsx
+index 00b9b82..c2a897b 100644
+--- a/packages/frontend/src/pages/ContactsPage.tsx
++++ b/packages/frontend/src/pages/ContactsPage.tsx
+@@ -1,22 +1,27 @@
+-import { useEffect, useState } from 'react';
++import { useEffect, useMemo, useState } from 'react';
+ import { api } from '../lib/api';
+-import type { ActiveTarget, WaContactSummary } from '../types';
++import type { BotTarget, WaContactSummary } from '../types';
+ 
+ export default function ContactsPage() {
+   const [contacts, setContacts] = useState<WaContactSummary[]>([]);
+-  const [target, setTarget] = useState<ActiveTarget | null>(null);
++  const [targets, setTargets] = useState<BotTarget[]>([]);
+   const [query, setQuery] = useState('');
+   const [loading, setLoading] = useState(false);
++  const [promptEditorJid, setPromptEditorJid] = useState<string | null>(null);
++  const [promptDraft, setPromptDraft] = useState('');
++  const [err, setErr] = useState<string | null>(null);
+ 
+   const refresh = async () => {
+     setLoading(true);
+     try {
+-      const [{ contacts }, { target }] = await Promise.all([
++      const [{ contacts }, { targets }] = await Promise.all([
+         api.listContacts(),
+-        api.activeContact(),
++        api.listTargets(),
+       ]);
+       setContacts(contacts);
+-      setTarget(target);
++      setTargets(targets);
++    } catch (e) {
++      setErr(e instanceof Error ? e.message : String(e));
+     } finally {
+       setLoading(false);
+     }
+@@ -28,157 +33,296 @@ export default function ContactsPage() {
+     return () => clearInterval(id);
+   }, []);
+ 
+-  const pick = async (c: WaContactSummary) => {
+-    const { target } = await api.selectContact(c.jid, c.name);
+-    setTarget(target);
++  const targetByJid = useMemo(() => {
++    const map = new Map<string, BotTarget>();
++    for (const t of targets) map.set(t.contactJid, t);
++    return map;
++  }, [targets]);
++
++  const filtered = useMemo(() => {
++    const q = query.trim().toLowerCase();
++    if (!q) return contacts;
++    return contacts.filter(
++      (c) => c.name.toLowerCase().includes(q) || c.jid.toLowerCase().includes(q),
++    );
++  }, [contacts, query]);
++
++  const addTarget = async (c: WaContactSummary) => {
++    await api.addTarget(c.jid, { name: c.name, enabled: true });
++    refresh();
+   };
+ 
+-  const filtered = contacts.filter((c) =>
+-    c.name.toLowerCase().includes(query.toLowerCase()),
+-  );
++  const removeTarget = async (jid: string) => {
++    await api.removeTarget(jid);
++    refresh();
++  };
++
++  const toggle = async (jid: string, enabled: boolean) => {
++    const updated = await api.toggleTarget(jid, enabled);
++    setTargets(updated.targets);
++  };
++
++  const toggleAll = async (enabled: boolean) => {
++    const updated = await api.toggleAllTargets(enabled);
++    setTargets(updated.targets);
++  };
++
++  const openPrompt = (t: BotTarget) => {
++    setPromptEditorJid(t.contactJid);
++    setPromptDraft(t.customPrompt ?? '');
++  };
++
++  const savePrompt = async () => {
++    if (!promptEditorJid) return;
++    const updated = await api.updateTargetPrompt(
++      promptEditorJid,
++      promptDraft.trim() ? promptDraft : null,
++    );
++    setTargets(updated.targets);
++    setPromptEditorJid(null);
++  };
++
++  const enabledCount = targets.filter((t) => t.enabled).length;
+ 
+   return (
+-    <div className="animate-fade-in" style={{ maxWidth: 640 }}>
++    <div className="animate-fade-in" style={{ maxWidth: 900 }}>
+       {/* Header */}
+-      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
++      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+         <div>
+-          <h2>Target Contact</h2>
+-          <p>Select the contact the AI bot will auto-reply to.</p>
++          <h2>Bot Targets</h2>
++          <p>
++            Pick <strong>one or many</strong> contacts. Toggle auto-reply individually,
++            or flip them all at once. Each contact can have its own custom prompt for a
++            different response style.
++          </p>
+         </div>
+-        <button
+-          onClick={refresh}
+-          className="btn-ghost"
+-          style={{ padding: '8px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+-        >
+-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={loading ? 'animate-spin-slow' : ''}>
+-            <polyline points="23 4 23 10 17 10"/>
+-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+-          </svg>
+-          Refresh
++        <button onClick={refresh} className="btn-ghost"
++          style={{ padding: '8px 12px', fontSize: 13 }}>
++          {loading ? 'Refreshing…' : 'Refresh'}
+         </button>
+       </div>
+ 
+-      {/* Active Target Banner */}
+-      {target && (
+-        <div className="animate-slide-in" style={{
+-          padding: '16px 20px', borderRadius: 12, marginBottom: 24,
+-          background: 'rgba(37,211,102,0.06)',
+-          border: '1px solid rgba(37,211,102,0.2)',
+-          display: 'flex', alignItems: 'center', gap: 14,
++      {err && (
++        <div className="alert-error" style={{ marginBottom: 16 }}>{err}</div>
++      )}
++
++      {/* Targets section */}
++      <div className="glass" style={{
++        padding: 20, borderRadius: 14, marginBottom: 20,
++        border: '1px solid rgba(37,211,102,0.25)',
++      }}>
++        <div style={{
++          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
++          gap: 12, marginBottom: 12, flexWrap: 'wrap',
+         }}>
+-          <div style={{
+-            width: 40, height: 40, borderRadius: '50%',
+-            background: 'var(--accent-green)', color: '#000',
+-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+-            boxShadow: '0 0 16px rgba(37,211,102,0.3)',
+-          }}>
+-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-              <circle cx="12" cy="12" r="10"/>
+-              <circle cx="12" cy="12" r="6"/>
+-              <circle cx="12" cy="12" r="2"/>
+-            </svg>
+-          </div>
+-          <div style={{ flex: 1 }}>
+-            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent-green)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+-              Active Target
++          <div>
++            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
++              Active Targets
++              <span style={{
++                fontSize: 11, marginLeft: 8, padding: '2px 8px', borderRadius: 99,
++                background: 'rgba(37,211,102,0.15)', color: 'var(--accent-green)',
++              }}>
++                {enabledCount}/{targets.length} enabled
++              </span>
+             </div>
+-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginTop: 2 }}>
+-              {target.contactName}
++            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
++              The bot will only reply to contacts whose toggle is ON.
+             </div>
+           </div>
+-          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'Fira Code, monospace' }}>
+-            {target.contactJid}
++          <div style={{ display: 'flex', gap: 8 }}>
++            <button onClick={() => toggleAll(true)} className="btn-primary"
++              disabled={!targets.length} style={{ padding: '6px 12px', fontSize: 12 }}>
++              Enable all
++            </button>
++            <button onClick={() => toggleAll(false)} className="btn-ghost"
++              disabled={!enabledCount} style={{ padding: '6px 12px', fontSize: 12 }}>
++              Disable all
++            </button>
+           </div>
+         </div>
+-      )}
+ 
+-      {/* Search Input */}
+-      <div style={{ position: 'relative', marginBottom: 16 }}>
+-        <div style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-            <circle cx="11" cy="11" r="8"/>
+-            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+-          </svg>
+-        </div>
++        {targets.length === 0 && (
++          <div style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)', fontSize: 13 }}>
++            No targets yet. Add a contact from the list below.
++          </div>
++        )}
++
++        {targets.map((t) => (
++          <div key={t.contactJid} className="glass-hover" style={{
++            display: 'flex', alignItems: 'center', gap: 12,
++            padding: '12px 14px', borderRadius: 10,
++            background: t.enabled ? 'rgba(37,211,102,0.06)' : 'rgba(0,0,0,0.18)',
++            border: `1px solid ${t.enabled ? 'rgba(37,211,102,0.2)' : 'var(--border)'}`,
++            marginBottom: 8,
++          }}>
++            <Toggle value={t.enabled} onChange={(v) => toggle(t.contactJid, v)} />
++            <div style={{ flex: 1, minWidth: 0 }}>
++              <div style={{
++                fontSize: 14, fontWeight: 600,
++                color: t.enabled ? 'var(--accent-green)' : 'var(--text-primary)',
++              }}>
++                {t.contactName}
++              </div>
++              <div style={{
++                fontSize: 11, fontFamily: 'Fira Code, monospace',
++                color: 'var(--text-muted)', marginTop: 2,
++                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
++              }}>
++                {t.contactJid}
++              </div>
++              {t.customPrompt && (
++                <div style={{
++                  fontSize: 11, color: 'var(--accent-blue)', marginTop: 4,
++                  display: 'flex', alignItems: 'center', gap: 4,
++                }}>
++                  ✨ has custom prompt ({t.customPrompt.length} chars)
++                </div>
++              )}
++            </div>
++            <button onClick={() => openPrompt(t)} className="btn-ghost"
++              style={{ padding: '6px 10px', fontSize: 12 }}>
++              {t.customPrompt ? 'Edit prompt' : '+ Prompt'}
++            </button>
++            <button onClick={() => removeTarget(t.contactJid)} className="btn-danger"
++              style={{ padding: '6px 10px', fontSize: 12 }}>
++              Remove
++            </button>
++          </div>
++        ))}
++      </div>
++
++      {/* Search */}
++      <div style={{ position: 'relative', marginBottom: 12 }}>
+         <input
+           value={query}
+           onChange={(e) => setQuery(e.target.value)}
+-          placeholder="Filter contacts…"
++          placeholder="Search contacts to add as targets…"
+           className="input"
+-          style={{ paddingLeft: 40, paddingRight: 14, paddingTop: 12, paddingBottom: 12 }}
++          style={{ paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12 }}
+         />
+       </div>
+ 
+-      {/* Contact List */}
++      {/* Contact pool */}
+       <div className="glass" style={{ borderRadius: 12, overflow: 'hidden' }}>
++        <div style={{
++          padding: '10px 14px', fontSize: 11, fontWeight: 600,
++          color: 'var(--text-muted)', letterSpacing: '0.05em',
++          textTransform: 'uppercase', borderBottom: '1px solid var(--border)',
++        }}>
++          Available Contacts ({filtered.length})
++        </div>
+         {loading && contacts.length === 0 && (
+-          <div style={{ padding: 24, textAlign: 'center' }}>
+-            <div className="skeleton" style={{ height: 48, marginBottom: 8 }} />
++          <div style={{ padding: 16 }}>
+             <div className="skeleton" style={{ height: 48, marginBottom: 8 }} />
+             <div className="skeleton" style={{ height: 48 }} />
+           </div>
+         )}
+-        
+         {filtered.map((c, i) => {
+-          const isActive = target?.contactJid === c.jid;
++          const isTarget = targetByJid.has(c.jid);
+           return (
+-            <button
+-              key={c.jid}
+-              type="button"
+-              onClick={() => pick(c)}
+-              className="glass-hover"
+-              style={{
+-                display: 'flex', alignItems: 'center', width: '100%',
+-                padding: '16px 20px', textAlign: 'left',
+-                border: 'none', borderBottom: i === filtered.length - 1 ? 'none' : '1px solid var(--border)',
+-                background: isActive ? 'var(--bg-card-hover)' : 'transparent',
+-                cursor: 'pointer',
+-              }}
+-            >
+-              <div style={{
+-                width: 36, height: 36, borderRadius: '50%',
+-                background: 'rgba(255,255,255,0.06)',
+-                display: 'flex', alignItems: 'center', justifyContent: 'center',
+-                color: 'var(--text-secondary)', marginRight: 16,
+-              }}>
+-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+-                  <circle cx="12" cy="7" r="4"/>
+-                </svg>
+-              </div>
+-              <div style={{ flex: 1 }}>
+-                <div style={{ fontSize: 14, fontWeight: isActive ? 600 : 500, color: isActive ? 'var(--accent-green)' : 'var(--text-primary)' }}>
++            <div key={c.jid} className="glass-hover" style={{
++              display: 'flex', alignItems: 'center', gap: 12,
++              padding: '12px 16px',
++              borderBottom: i === filtered.length - 1 ? 'none' : '1px solid var(--border)',
++              opacity: isTarget ? 0.5 : 1,
++            }}>
++              <div style={{ flex: 1, minWidth: 0 }}>
++                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>
+                   {c.name}
+                 </div>
+-                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'Fira Code, monospace', marginTop: 2 }}>
++                <div style={{
++                  fontSize: 11, fontFamily: 'Fira Code, monospace',
++                  color: 'var(--text-muted)', marginTop: 2,
++                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
++                }}>
+                   {c.jid}
+                 </div>
+               </div>
+-              {isActive && (
+-                <div style={{ color: 'var(--accent-green)', paddingLeft: 12 }}>
+-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-                    <polyline points="20 6 9 17 4 12"/>
+-                  </svg>
+-                </div>
++              {isTarget ? (
++                <span style={{ fontSize: 11, color: 'var(--accent-green)' }}>✓ added</span>
++              ) : (
++                <button onClick={() => addTarget(c)} className="btn-primary"
++                  style={{ padding: '6px 12px', fontSize: 12 }}>
++                  + Add target
++                </button>
+               )}
+-            </button>
++            </div>
+           );
+         })}
+-        
+         {!loading && filtered.length === 0 && (
+-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+-            <div style={{ marginBottom: 12, opacity: 0.5 }}>
+-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto' }}>
+-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+-                <circle cx="9" cy="7" r="4"/>
+-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+-                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+-              </svg>
+-            </div>
++          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+             {query ? 'No contacts match your search.' : 'No contacts yet. Send/receive a message on WhatsApp to populate this list.'}
+           </div>
+         )}
+       </div>
++
++      {/* Prompt editor modal */}
++      {promptEditorJid && (
++        <div
++          onClick={() => setPromptEditorJid(null)}
++          style={{
++            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 20,
++            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
++            backdropFilter: 'blur(4px)',
++          }}>
++          <div
++            onClick={(e) => e.stopPropagation()}
++            style={{
++              maxWidth: 600, width: '100%', borderRadius: 16, padding: 24,
++              background: '#0d1117', border: '1px solid var(--border)',
++              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
++            }}>
++            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
++              Custom prompt for {targetByJid.get(promptEditorJid)?.contactName}
++            </div>
++            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
++              This text is appended to the system prompt for <strong>this contact only</strong>,
++              overriding the global style. Use it to ask for a sarcastic tone, formal English,
++              shorter replies, refusing certain topics, etc.
++            </div>
++            <textarea
++              className="input"
++              rows={8}
++              value={promptDraft}
++              onChange={(e) => setPromptDraft(e.target.value)}
++              placeholder="e.g. Reply in formal English. Never use emojis. Refuse to discuss money or relationships."
++              style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', marginBottom: 16 }}
++            />
++            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
++              <button onClick={() => { setPromptDraft(''); }} className="btn-ghost">
++                Clear
++              </button>
++              <div style={{ display: 'flex', gap: 8 }}>
++                <button onClick={() => setPromptEditorJid(null)} className="btn-ghost">Cancel</button>
++                <button onClick={savePrompt} className="btn-primary">Save prompt</button>
++              </div>
++            </div>
++          </div>
++        </div>
++      )}
+     </div>
+   );
+ }
++
++function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
++  return (
++    <button
++      type="button"
++      onClick={() => onChange(!value)}
++      style={{
++        flexShrink: 0,
++        width: 40, height: 22, borderRadius: 999,
++        border: 'none', cursor: 'pointer',
++        background: value ? 'var(--accent-green)' : 'rgba(255,255,255,0.15)',
++        position: 'relative', transition: 'all 150ms ease',
++      }}
++      aria-pressed={value}
++    >
++      <span style={{
++        position: 'absolute', top: 2, left: value ? 20 : 2,
++        width: 18, height: 18, borderRadius: '50%', background: '#fff',
++        transition: 'left 150ms ease',
++      }} />
++    </button>
++  );
++}
+diff --git a/packages/frontend/src/pages/SettingsPage.tsx b/packages/frontend/src/pages/SettingsPage.tsx
+index b4b8daf..db2668b 100644
+--- a/packages/frontend/src/pages/SettingsPage.tsx
++++ b/packages/frontend/src/pages/SettingsPage.tsx
+@@ -1,113 +1,334 @@
++import { useEffect, useState } from 'react';
++import { api } from '../lib/api';
++import type { RuntimeSettings } from '../types';
++
++type Patch = Partial<RuntimeSettings>;
++
+ export default function SettingsPage() {
+-  return (
+-    <div className="animate-fade-in" style={{ maxWidth: 800 }}>
+-      {/* Header */}
+-      <div className="page-header">
+-        <h2>System Settings</h2>
+-        <p>Configure LLM providers and bot behavior via environment variables.</p>
++  const [settings, setSettings] = useState<RuntimeSettings | null>(null);
++  const [dirty, setDirty] = useState<Patch>({});
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const [savedAt, setSavedAt] = useState<number | null>(null);
++
++  useEffect(() => {
++    api.getSettings()
++      .then((r) => setSettings(r.settings))
++      .catch((e: Error) => setError(e.message));
++  }, []);
++
++  const set = <K extends keyof RuntimeSettings>(key: K, value: RuntimeSettings[K]) => {
++    setSettings((s) => (s ? { ...s, [key]: value } : s));
++    setDirty((d) => ({ ...d, [key]: value }));
++  };
++
++  const save = async () => {
++    if (!Object.keys(dirty).length) return;
++    setBusy(true);
++    setError(null);
++    try {
++      const r = await api.updateSettings(dirty);
++      setSettings(r.settings);
++      setDirty({});
++      setSavedAt(Date.now());
++    } catch (e) {
++      setError(e instanceof Error ? e.message : String(e));
++    } finally {
++      setBusy(false);
++    }
++  };
++
++  const reset = async () => {
++    if (!confirm('Reset ALL runtime settings to their defaults?')) return;
++    setBusy(true);
++    setError(null);
++    try {
++      const r = await api.resetSettings();
++      setSettings(r.settings);
++      setDirty({});
++      setSavedAt(Date.now());
++    } catch (e) {
++      setError(e instanceof Error ? e.message : String(e));
++    } finally {
++      setBusy(false);
++    }
++  };
++
++  if (!settings) {
++    return (
++      <div className="animate-fade-in" style={{ maxWidth: 800 }}>
++        <div className="page-header">
++          <h2>Settings</h2>
++          <p>Loading runtime configuration…</p>
++        </div>
++        {error && <div className="alert-error">{error}</div>}
++        {[1, 2, 3, 4].map((i) => (
++          <div key={i} className="skeleton" style={{ height: 60, marginBottom: 12 }} />
++        ))}
+       </div>
++    );
++  }
+ 
+-      <div className="glass" style={{ padding: 32, borderRadius: 16, marginBottom: 24 }}>
+-        <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-blue)" strokeWidth="2">
+-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8"/>
+-          </svg>
+-          .env Configuration
+-        </h3>
+-        
+-        <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 24 }}>
+-          The backend configuration is loaded from the <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: 4, color: 'var(--text-primary)' }}>.env</code> file in the backend package directory. 
+-          Restart the backend server after making changes.
+-        </p>
+-
+-        <div style={{ display: 'grid', gap: 16 }}>
+-          <EnvVar
+-            name="LLM_PROVIDER"
+-            values={['anthropic', 'openai', 'ollama', 'openrouter', 'gemini']}
+-            desc="Select which AI engine to use for generating responses."
+-          />
+-          <EnvVar
+-            name="ANTHROPIC_API_KEY"
+-            desc="Required if using Anthropic. Get this from console.anthropic.com."
+-          />
+-          <EnvVar
+-            name="OPENAI_API_KEY"
+-            desc="Required if using OpenAI. Get this from platform.openai.com."
+-          />
+-          <EnvVar
+-            name="OPENROUTER_API_KEY"
+-            name2="OPENROUTER_MODEL"
+-            desc="Required if using OpenRouter. e.g. openai/gpt-4o, anthropic/claude-3.5-sonnet."
+-          />
+-          <EnvVar
+-            name="GEMINI_API_KEY"
+-            name2="GEMINI_MODEL"
+-            desc="Required if using Gemini. e.g. gemini-1.5-pro, gemini-2.0-flash."
+-          />
+-          <EnvVar
+-            name="OLLAMA_BASE_URL"
+-            name2="OLLAMA_MODEL"
+-            desc="For local models. Base URL is typically http://127.0.0.1:11434."
+-          />
+-          <EnvVar
+-            name="REPLY_DELAY_MIN"
+-            name2="REPLY_DELAY_MAX"
+-            desc="Human-like typing delay in milliseconds (Anti-ban)."
+-          />
+-          <EnvVar
+-            name="CONTEXT_WINDOW"
+-            desc="Number of recent messages to include as conversational context."
+-          />
++  const s = settings;
++  const isDirty = Object.keys(dirty).length > 0;
++
++  return (
++    <div className="animate-fade-in" style={{ maxWidth: 900, paddingBottom: 100 }}>
++      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
++        <div>
++          <h2>Bot Settings</h2>
++          <p>
++            All settings below are <strong>live</strong> &mdash; they take effect on the
++            next incoming message without restarting the backend.
++          </p>
++        </div>
++        <div style={{ display: 'flex', gap: 8 }}>
++          <button onClick={reset} className="btn-ghost" disabled={busy}>Reset</button>
++          <button
++            onClick={save}
++            disabled={!isDirty || busy}
++            className="btn-primary"
++            style={{ padding: '8px 16px' }}
++          >
++            {busy ? 'Saving…' : isDirty ? `Save (${Object.keys(dirty).length})` : 'Saved'}
++          </button>
+         </div>
+       </div>
+ 
+-      {/* Disclaimer */}
+-      <div style={{
+-        padding: '16px 20px', borderRadius: 12,
+-        background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)',
+-        display: 'flex', gap: 16, alignItems: 'flex-start',
+-      }}>
+-        <div style={{ color: 'var(--warning)', marginTop: 2 }}>
+-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+-            <line x1="12" y1="9" x2="12" y2="13"/>
+-            <line x1="12" y1="17" x2="12.01" y2="17"/>
+-          </svg>
++      {error && (
++        <div className="alert-error" style={{ marginBottom: 16 }}>
++          <strong>Error:</strong> {error}
+         </div>
+-        <div>
+-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--warning)', marginBottom: 4 }}>
+-            Important Disclaimer
++      )}
++      {savedAt && !isDirty && (
++        <div style={{
++          padding: '10px 14px', marginBottom: 16, borderRadius: 8,
++          background: 'rgba(37,211,102,0.08)', border: '1px solid rgba(37,211,102,0.2)',
++          fontSize: 13, color: 'var(--accent-green)',
++        }}>
++          ✓ Settings saved · {new Date(savedAt).toLocaleTimeString()}
++        </div>
++      )}
++
++      {/* LLM */}
++      <Section title="🧠 AI Model" desc="Provider, model name and core sampling controls.">
++        <Field label="LLM Provider" hint="Which AI engine to call for replies.">
++          <select className="input" value={s.llmProvider}
++            onChange={(e) => set('llmProvider', e.target.value as RuntimeSettings['llmProvider'])}>
++            <option value="anthropic">Anthropic (Claude)</option>
++            <option value="openai">OpenAI</option>
++            <option value="ollama">Ollama (local)</option>
++            <option value="openrouter">OpenRouter</option>
++            <option value="gemini">Google Gemini</option>
++          </select>
++        </Field>
++        <Field label="Model name override" hint="Empty = use the default from your .env (e.g. claude-3-5-sonnet-20240620).">
++          <input className="input" type="text" value={s.llmModel} placeholder="(use .env default)"
++            onChange={(e) => set('llmModel', e.target.value)} />
++        </Field>
++        <Field label={`Temperature: ${s.temperature.toFixed(2)}`} hint="Lower = more deterministic, higher = more creative.">
++          <input type="range" min={0} max={2} step={0.05} value={s.temperature}
++            onChange={(e) => set('temperature', Number(e.target.value))} style={{ width: '100%' }} />
++        </Field>
++        <Field label="Max output tokens" hint="Upper bound for each generated reply.">
++          <input className="input" type="number" min={16} max={4096} value={s.maxTokens}
++            onChange={(e) => set('maxTokens', Number(e.target.value))} />
++        </Field>
++        <Field label="Context window" hint="How many recent messages to include in the prompt.">
++          <input className="input" type="number" min={1} max={200} value={s.contextWindow}
++            onChange={(e) => set('contextWindow', Number(e.target.value))} />
++        </Field>
++      </Section>
++
++      {/* Reply behaviour */}
++      <Section title="⌨️ Reply Behaviour" desc="How the bot times and shapes outgoing messages.">
++        <Field label="Min reply delay (ms)" hint="Lower bound for the human-like typing delay.">
++          <input className="input" type="number" min={0} max={120000} value={s.replyDelayMin}
++            onChange={(e) => set('replyDelayMin', Number(e.target.value))} />
++        </Field>
++        <Field label="Max reply delay (ms)" hint="Upper bound for the human-like typing delay.">
++          <input className="input" type="number" min={0} max={120000} value={s.replyDelayMax}
++            onChange={(e) => set('replyDelayMax', Number(e.target.value))} />
++        </Field>
++        <Toggle label="Show typing indicator" desc="Send presence: composing → paused around each reply."
++          value={s.typingIndicator} onChange={(v) => set('typingIndicator', v)} />
++        <Toggle label="Enable burst-split" desc="When the style is 'burst', allow splitting into multiple messages."
++          value={s.burstSplitEnabled} onChange={(v) => set('burstSplitEnabled', v)} />
++        <Toggle label="Anti-ban jitter" desc="Adds an extra small random delay before each reply."
++          value={s.antiBanJitter} onChange={(v) => set('antiBanJitter', v)} />
++      </Section>
++
++      {/* Filters */}
++      <Section title="🛡️ Filters" desc="Pick exactly which inbound messages the bot should answer.">
++        <Toggle label="Reply in groups" desc="Allow the bot to respond inside group chats (default off)."
++          value={s.replyToGroups} onChange={(v) => set('replyToGroups', v)} />
++        <Toggle label="Reply to unknown contacts" desc="If on, reply even when the JID is not in your target list."
++          value={s.replyToUnknown} onChange={(v) => set('replyToUnknown', v)} />
++        <Field label="Ignore regex" hint="Skip any inbound message matching this regex (case-insensitive).">
++          <input className="input" type="text" value={s.ignoreRegex} placeholder="^stop$|/cmd"
++            onChange={(e) => set('ignoreRegex', e.target.value)} />
++        </Field>
++        <Field label="Allowed keywords" hint="Comma-separated. If non-empty, only reply when one of these is present.">
++          <input className="input" type="text" value={s.allowedKeywords} placeholder="hi, hello, help"
++            onChange={(e) => set('allowedKeywords', e.target.value)} />
++        </Field>
++        <Field label="Ignored keywords" hint="Comma-separated. Messages containing any of these are skipped.">
++          <input className="input" type="text" value={s.ignoredKeywords} placeholder="spam, promo"
++            onChange={(e) => set('ignoredKeywords', e.target.value)} />
++        </Field>
++      </Section>
++
++      {/* Schedule */}
++      <Section title="🕒 Schedule" desc="Restrict the bot to certain hours / days.">
++        <Field label={`Active hours start: ${s.activeHoursStart}:00`} hint="">
++          <input type="range" min={0} max={23} step={1} value={s.activeHoursStart}
++            onChange={(e) => set('activeHoursStart', Number(e.target.value))} style={{ width: '100%' }} />
++        </Field>
++        <Field label={`Active hours end: ${s.activeHoursEnd}:59`} hint="If end < start the window wraps over midnight.">
++          <input type="range" min={0} max={23} step={1} value={s.activeHoursEnd}
++            onChange={(e) => set('activeHoursEnd', Number(e.target.value))} style={{ width: '100%' }} />
++        </Field>
++        <Toggle label="Reply on weekends" desc="Turn off to keep weekends quiet."
++          value={s.weekendEnabled} onChange={(v) => set('weekendEnabled', v)} />
++        <Field label="Timezone offset (minutes vs UTC)" hint="Use the offset for your active-hours window. e.g. 330 = IST, -480 = PST.">
++          <input className="input" type="number" min={-720} max={840} step={15} value={s.timezoneOffset}
++            onChange={(e) => set('timezoneOffset', Number(e.target.value))} />
++        </Field>
++      </Section>
++
++      {/* Style */}
++      <Section title="🎨 Style Tweaks" desc="Fine-tune how strictly the AI follows the learned fingerprint.">
++        <Field label={`Emoji boost: ${s.emojiBoost > 0 ? '+' : ''}${s.emojiBoost.toFixed(2)}`}
++          hint="-1 = strip emojis aggressively, +1 = use more than the baseline.">
++          <input type="range" min={-1} max={1} step={0.1} value={s.emojiBoost}
++            onChange={(e) => set('emojiBoost', Number(e.target.value))} style={{ width: '100%' }} />
++        </Field>
++        <Field label={`Style strictness: ${(s.styleStrictness * 100).toFixed(0)}%`}
++          hint="Higher = stick closer to the fingerprint, lower = freer responses.">
++          <input type="range" min={0} max={1} step={0.05} value={s.styleStrictness}
++            onChange={(e) => set('styleStrictness', Number(e.target.value))} style={{ width: '100%' }} />
++        </Field>
++        <Field label="Language override" hint="ISO code like 'en', 'es', 'hi'. Empty = auto-detect.">
++          <input className="input" type="text" value={s.languageOverride} placeholder="(auto)"
++            onChange={(e) => set('languageOverride', e.target.value)} />
++        </Field>
++      </Section>
++
++      {/* Safety */}
++      <Section title="⚠️ Safety & Limits" desc="Hard caps that protect your account from getting banned.">
++        <Toggle label="Do-not-disturb (kill switch)" desc="When on, the bot ignores ALL messages, regardless of other toggles."
++          value={s.doNotDisturb} onChange={(v) => set('doNotDisturb', v)} />
++        <Toggle label="Enable rate-limit" desc="Stops replying once the hourly cap is hit."
++          value={s.rateLimitEnabled} onChange={(v) => set('rateLimitEnabled', v)} />
++        <Field label="Max replies per hour" hint="Applied when rate-limit is enabled.">
++          <input className="input" type="number" min={1} max={10000} value={s.maxRepliesPerHour}
++            onChange={(e) => set('maxRepliesPerHour', Number(e.target.value))} />
++        </Field>
++      </Section>
++
++      {/* Misc */}
++      <Section title="🧰 Misc" desc="Logging and global prompt injection.">
++        <Toggle label="Send read receipts" desc="Mark incoming messages as read (best-effort)."
++          value={s.readReceipts} onChange={(v) => set('readReceipts', v)} />
++        <Field label="Log retention (days)" hint="Older log entries can be cleared by your housekeeping job.">
++          <input className="input" type="number" min={1} max={3650} value={s.logRetentionDays}
++            onChange={(e) => set('logRetentionDays', Number(e.target.value))} />
++        </Field>
++        <Field
++          label="Global custom prompt"
++          hint="Injected into the system prompt for EVERY contact. Use per-contact prompts in the Contacts page for fine-grained styles."
++        >
++          <textarea
++            className="input"
++            rows={4}
++            placeholder="e.g. Always reply in lowercase. Never use exclamation marks. Refuse politely to discuss money."
++            value={s.globalSystemPrompt}
++            onChange={(e) => set('globalSystemPrompt', e.target.value)}
++            style={{ resize: 'vertical', fontFamily: 'inherit' }}
++          />
++        </Field>
++      </Section>
++
++      {/* Sticky save bar */}
++      {isDirty && (
++        <div style={{
++          position: 'fixed', bottom: 16, left: 256, right: 16, zIndex: 10,
++          padding: '12px 20px', borderRadius: 12,
++          background: 'rgba(13,17,23,0.95)', border: '1px solid rgba(37,211,102,0.3)',
++          backdropFilter: 'blur(20px)',
++          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
++          boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
++        }}>
++          <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
++            <strong style={{ color: 'var(--accent-green)' }}>{Object.keys(dirty).length}</strong> unsaved change(s)
+           </div>
+-          <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+-            Use this software responsibly. Impersonating real people without their explicit consent
+-            may break laws in your jurisdiction and violates WhatsApp's Terms of Service.
++          <div style={{ display: 'flex', gap: 8 }}>
++            <button onClick={() => { setDirty({}); api.getSettings().then((r) => setSettings(r.settings)); }}
++              className="btn-ghost" disabled={busy}>Discard</button>
++            <button onClick={save} className="btn-primary" disabled={busy}>
++              {busy ? 'Saving…' : 'Save changes'}
++            </button>
+           </div>
+         </div>
++      )}
++    </div>
++  );
++}
++
++function Section({ title, desc, children }: { title: string; desc: string; children: React.ReactNode }) {
++  return (
++    <div className="glass" style={{ padding: 24, borderRadius: 14, marginBottom: 16 }}>
++      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</h3>
++      <p style={{ margin: '4px 0 18px', fontSize: 13, color: 'var(--text-muted)' }}>{desc}</p>
++      <div style={{ display: 'grid', gap: 14 }}>
++        {children}
+       </div>
+     </div>
+   );
+ }
+ 
+-function EnvVar({ name, name2, values, desc }: { name: string; name2?: string; values?: string[]; desc: string }) {
++function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
++  return (
++    <label style={{ display: 'block' }}>
++      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{label}</div>
++      {hint && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.4 }}>{hint}</div>}
++      {children}
++    </label>
++  );
++}
++
++function Toggle({ label, desc, value, onChange }: {
++  label: string; desc?: string; value: boolean; onChange: (v: boolean) => void;
++}) {
+   return (
+     <div style={{
+-      padding: '12px 16px', borderRadius: 8,
++      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
++      padding: '10px 12px', borderRadius: 8,
+       background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)',
+     }}>
+-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 8 }}>
+-        <code style={{ fontSize: 13, color: 'var(--accent-blue)', fontWeight: 600 }}>{name}</code>
+-        {name2 && <code style={{ fontSize: 13, color: 'var(--accent-blue)', fontWeight: 600 }}>{name2}</code>}
+-        {values && (
+-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+-            {values.map(v => (
+-              <span key={v} style={{ fontSize: 11, background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: 99, color: 'var(--text-muted)' }}>
+-                {v}
+-              </span>
+-            ))}
+-          </div>
+-        )}
++      <div>
++        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>{label}</div>
++        {desc && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.4 }}>{desc}</div>}
+       </div>
+-      <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{desc}</div>
++      <button
++        type="button"
++        onClick={() => onChange(!value)}
++        style={{
++          flexShrink: 0,
++          width: 44, height: 24, borderRadius: 999,
++          border: 'none', cursor: 'pointer',
++          background: value ? 'var(--accent-green)' : 'rgba(255,255,255,0.15)',
++          position: 'relative', transition: 'all 150ms ease',
++        }}
++        aria-pressed={value}
++        aria-label={label}
++      >
++        <span style={{
++          position: 'absolute', top: 2, left: value ? 22 : 2,
++          width: 20, height: 20, borderRadius: '50%', background: '#fff',
++          transition: 'left 150ms ease',
++        }} />
++      </button>
+     </div>
+   );
+ }
+diff --git a/packages/frontend/src/pages/UploadPage.tsx b/packages/frontend/src/pages/UploadPage.tsx
+index a9c04a8..7842096 100644
+--- a/packages/frontend/src/pages/UploadPage.tsx
++++ b/packages/frontend/src/pages/UploadPage.tsx
+@@ -1,13 +1,25 @@
+-import { useState } from 'react';
++import { useEffect, useState } from 'react';
+ import { api } from '../lib/api';
+-import type { StyleProfile } from '../types';
++import type { BotTarget, StyleProfile } from '../types';
+ 
+ export default function UploadPage() {
+   const [file, setFile] = useState<File | null>(null);
+   const [busy, setBusy] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+-  const [result, setResult] = useState<{ inserted: number; profile: StyleProfile } | null>(null);
++  const [result, setResult] = useState<{ inserted: number; profile: StyleProfile; contactJid?: string } | null>(null);
+   const [isDragging, setIsDragging] = useState(false);
++  const [targets, setTargets] = useState<BotTarget[]>([]);
++  const [selectedJid, setSelectedJid] = useState<string>('');
++
++  useEffect(() => {
++    api.listTargets()
++      .then((r) => {
++        setTargets(r.targets);
++        if (r.targets.length && !selectedJid) setSelectedJid(r.targets[0]!.contactJid);
++      })
++      .catch(() => undefined);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
+ 
+   const onSubmit = async (e?: React.FormEvent) => {
+     if (e) e.preventDefault();
+@@ -15,7 +27,7 @@ export default function UploadPage() {
+     setBusy(true);
+     setError(null);
+     try {
+-      const r = await api.uploadChat(file);
++      const r = await api.uploadChat(file, selectedJid || undefined);
+       setResult(r);
+     } catch (err) {
+       setError(err instanceof Error ? err.message : String(err));
+@@ -31,44 +43,58 @@ export default function UploadPage() {
+     if (f) setFile(f);
+   };
+ 
++  const selectedTarget = targets.find((t) => t.contactJid === selectedJid);
++
+   return (
+-    <div className="animate-fade-in" style={{ maxWidth: 640 }}>
++    <div className="animate-fade-in" style={{ maxWidth: 700 }}>
+       {/* Header */}
+       <div className="page-header">
+         <h2>Train the AI</h2>
+-        <p>Upload your WhatsApp chat history so the AI can learn your vocabulary, emojis, and texting habits.</p>
++        <p>Upload a WhatsApp chat export so the AI can learn the style. Each contact has its own dedicated style profile.</p>
++      </div>
++
++      {/* Contact selector */}
++      <div className="glass" style={{ padding: 20, borderRadius: 12, marginBottom: 16 }}>
++        <label style={{ display: 'block' }}>
++          <div style={{
++            fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6,
++            letterSpacing: '0.04em', textTransform: 'uppercase',
++          }}>
++            Assign this chat export to
++          </div>
++          <select
++            className="input"
++            value={selectedJid}
++            onChange={(e) => setSelectedJid(e.target.value)}
++            style={{ width: '100%' }}
++          >
++            <option value="">— Use the currently active target —</option>
++            {targets.map((t) => (
++              <option key={t.contactJid} value={t.contactJid}>
++                {t.contactName} {t.enabled ? '· auto-reply ON' : ''}
++              </option>
++            ))}
++          </select>
++          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
++            {selectedTarget
++              ? `Style profile will be saved to "${selectedTarget.contactName}" only.`
++              : 'No specific contact selected — the upload will use the legacy active target.'}
++          </div>
++        </label>
+       </div>
+ 
+       {/* Instructions */}
+-      <div className="glass" style={{
+-        padding: 24, borderRadius: 12, marginBottom: 24,
+-        display: 'flex', gap: 20, alignItems: 'flex-start',
+-      }}>
+-        <div style={{
+-          width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+-          background: 'rgba(59,130,246,0.1)', color: 'var(--accent-blue)',
+-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+-        }}>
+-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+-            <circle cx="12" cy="12" r="10"/>
+-            <path d="M12 16v-4"/>
+-            <path d="M12 8h.01"/>
+-          </svg>
+-        </div>
+-        <div>
+-          <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>How to export</h3>
+-          <ol style={{ margin: 0, paddingLeft: 16, fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+-            <li>Open WhatsApp on your phone</li>
+-            <li>Go to any chat with a lot of messages</li>
+-            <li>Tap <strong>⋮</strong> (Menu) → <strong>More</strong> → <strong>Export chat</strong></li>
+-            <li>Select <strong>Without media</strong></li>
+-            <li>Upload the <code style={{ color: 'var(--text-primary)', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>.zip</code> or <code style={{ color: 'var(--text-primary)', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>.txt</code> here</li>
+-          </ol>
+-        </div>
++      <div className="glass" style={{ padding: 20, borderRadius: 12, marginBottom: 16, fontSize: 13 }}>
++        <strong style={{ color: 'var(--text-primary)' }}>How to export from WhatsApp</strong>
++        <ol style={{ margin: '8px 0 0', paddingLeft: 16, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
++          <li>Open the chat with the contact you selected above</li>
++          <li>Tap <strong>⋮</strong> → <strong>More</strong> → <strong>Export chat</strong></li>
++          <li>Choose <strong>Without media</strong></li>
++          <li>Upload the <code>.zip</code> or <code>.txt</code> here</li>
++        </ol>
+       </div>
+ 
+       <form onSubmit={onSubmit}>
+-        {/* Dropzone */}
+         <div
+           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+           onDragLeave={() => setIsDragging(false)}
+@@ -76,8 +102,8 @@ export default function UploadPage() {
+           style={{
+             border: `2px dashed ${isDragging ? 'var(--accent-blue)' : 'var(--border)'}`,
+             background: isDragging ? 'rgba(59,130,246,0.05)' : 'var(--bg-card)',
+-            borderRadius: 16, padding: 40, textAlign: 'center',
+-            transition: 'all 200ms ease', marginBottom: 24,
++            borderRadius: 16, padding: 36, textAlign: 'center',
++            transition: 'all 200ms ease', marginBottom: 16,
+             cursor: 'pointer', position: 'relative',
+           }}
+         >
+@@ -90,74 +116,49 @@ export default function UploadPage() {
+               opacity: 0, cursor: 'pointer',
+             }}
+           />
+-          <div style={{ color: file ? 'var(--accent-green)' : 'var(--text-muted)', marginBottom: 16 }}>
+-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto' }}>
+-              {file ? (
+-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8"/>
+-              ) : (
+-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12"/>
+-              )}
+-            </svg>
+-          </div>
+           <div style={{ fontSize: 16, fontWeight: 600, color: file ? 'var(--accent-green)' : 'var(--text-primary)' }}>
+             {file ? file.name : 'Click or drag file to upload'}
+           </div>
+-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8 }}>
+-            {file ? `${(file.size / 1024).toFixed(1)} KB` : 'Supports .txt and .zip files'}
++          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
++            {file ? `${(file.size / 1024).toFixed(1)} KB` : 'Supports .txt and .zip exports'}
+           </div>
+         </div>
+ 
+-        {/* Submit */}
+         <button
+           type="submit"
+           disabled={!file || busy}
+           className="btn-primary"
+-          style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 16 }}
++          style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 15 }}
+         >
+-          {busy ? (
+-            <>
+-              <svg className="animate-spin-slow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+-                <line x1="12" y1="2" x2="12" y2="6"/>
+-                <line x1="12" y1="18" x2="12" y2="22"/>
+-                <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/>
+-                <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+-                <line x1="2" y1="12" x2="6" y2="12"/>
+-                <line x1="18" y1="12" x2="22" y2="12"/>
+-                <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/>
+-                <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+-              </svg>
+-              Parsing & Modeling...
+-            </>
+-          ) : (
+-            'Train AI Model'
+-          )}
++          {busy
++            ? 'Parsing & modelling…'
++            : selectedTarget
++              ? `Train AI for "${selectedTarget.contactName}"`
++              : 'Train AI (active target)'}
+         </button>
+       </form>
+ 
+       {error && (
+-        <div className="alert-error animate-fade-in" style={{ marginTop: 24 }}>
++        <div className="alert-error animate-fade-in" style={{ marginTop: 16 }}>
+           <strong>Error:</strong> {error}
+         </div>
+       )}
+ 
+       {result && (
+         <div className="animate-slide-in" style={{
+-          marginTop: 32, padding: 24, borderRadius: 12,
++          marginTop: 24, padding: 20, borderRadius: 12,
+           background: 'rgba(37,211,102,0.08)', border: '1px solid rgba(37,211,102,0.2)'
+         }}>
+-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--accent-green)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+-                <polyline points="20 6 9 17 4 12"/>
+-              </svg>
+-            </div>
+-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--accent-green)' }}>
+-              Training Complete
+-            </div>
++          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--accent-green)', marginBottom: 8 }}>
++            ✓ Training complete
+           </div>
+-          <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
+-            Successfully parsed <strong>{result.inserted}</strong> messages into the vector database.
+-            The AI has built a new stylistic profile based on this data.
++          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
++            Parsed <strong>{result.inserted}</strong> messages.
++            {result.contactJid ? ` Style profile bound to ${result.contactJid}.` : ''}
++            <br />
++            Language: <strong>{result.profile.language}</strong> · avg length{' '}
++            <strong>{result.profile.avgMsgLength.toFixed(1)}</strong> chars · burst{' '}
++            <strong>{result.profile.burstPattern}</strong>.
+           </p>
+         </div>
+       )}
+diff --git a/packages/frontend/src/types.ts b/packages/frontend/src/types.ts
+index fbca860..ddec3e0 100644
+--- a/packages/frontend/src/types.ts
++++ b/packages/frontend/src/types.ts
+@@ -18,8 +18,18 @@ export interface ActiveTarget {
+   setAt: number;
+ }
+ 
++export interface BotTarget {
++  sessionId: number;
++  contactJid: string;
++  contactName: string;
++  enabled: boolean;
++  customPrompt: string | null;
++  createdAt: number;
++}
++
+ export interface StyleProfile {
+   sessionId: number;
++  contactJid: string;
+   avgMsgLength: number;
+   emojiRatio: number;
+   topEmojis: string[];
+@@ -39,4 +49,42 @@ export interface ConversationLogEntry {
+   content: string;
+   aiGenerated: boolean;
+   sentAt: number;
++  contactJid: string | null;
++}
++
++export interface RuntimeSettings {
++  llmProvider: 'anthropic' | 'openai' | 'ollama' | 'openrouter' | 'gemini';
++  llmModel: string;
++  temperature: number;
++  maxTokens: number;
++  contextWindow: number;
++
++  replyDelayMin: number;
++  replyDelayMax: number;
++  typingIndicator: boolean;
++  burstSplitEnabled: boolean;
++  antiBanJitter: boolean;
++
++  replyToGroups: boolean;
++  replyToUnknown: boolean;
++  ignoreRegex: string;
++  allowedKeywords: string;
++  ignoredKeywords: string;
++
++  activeHoursStart: number;
++  activeHoursEnd: number;
++  weekendEnabled: boolean;
++  timezoneOffset: number;
++
++  emojiBoost: number;
++  styleStrictness: number;
++  languageOverride: string;
++
++  maxRepliesPerHour: number;
++  rateLimitEnabled: boolean;
++  doNotDisturb: boolean;
++
++  readReceipts: boolean;
++  logRetentionDays: number;
++  globalSystemPrompt: string;
+ }

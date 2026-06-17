@@ -14,6 +14,7 @@ import contactRoutes from './routes/contacts.js';
 import uploadRoutes from './routes/upload.js';
 import styleRoutes from './routes/style.js';
 import botRoutes from './routes/bot.js';
+import settingsRoutes from './routes/settings.js';
 
 async function main(): Promise<void> {
   migrate();
@@ -32,6 +33,7 @@ async function main(): Promise<void> {
   app.use('/api/upload', uploadRoutes);
   app.use('/api/style-profile', styleRoutes);
   app.use('/api/bot', botRoutes);
+  app.use('/api/settings', settingsRoutes);
 
   const server = http.createServer(app);
 

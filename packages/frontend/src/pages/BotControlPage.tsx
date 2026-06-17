@@ -1,15 +1,24 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import type { ActiveTarget } from '../types';
+import type { BotTarget } from '../types';
 
 export default function BotControlPage() {
   const [enabled, setEnabled] = useState(false);
-  const [target, setTarget] = useState<ActiveTarget | null>(null);
+  const [targets, setTargets] = useState<BotTarget[]>([]);
   const [busy, setBusy] = useState(false);
 
+  const refresh = async () => {
+    const [s, t] = await Promise.all([
+      api.botStatus().catch(() => ({ enabled: false })),
+      api.listTargets().catch(() => ({ targets: [] })),
+    ]);
+    setEnabled(s.enabled);
+    setTargets(t.targets);
+  };
+
   useEffect(() => {
-    api.botStatus().then((r) => setEnabled(r.enabled)).catch(() => undefined);
-    api.activeContact().then((r) => setTarget(r.target)).catch(() => undefined);
+    refresh();
   }, []);
 
   const toggle = async () => {
@@ -22,138 +31,137 @@ export default function BotControlPage() {
     }
   };
 
+  const enabledTargets = targets.filter((t) => t.enabled);
+  const canEnable = enabledTargets.length > 0;
+
   return (
-    <div className="animate-fade-in" style={{ maxWidth: 560 }}>
-      {/* Header */}
+    <div className="animate-fade-in" style={{ maxWidth: 700 }}>
       <div className="page-header">
         <h2>Bot Control</h2>
-        <p>Enable or disable the autonomous AI responder.</p>
+        <p>
+          Global master switch for the autonomous AI responder. Per-contact toggles live in the{' '}
+          <Link to="/contacts" style={{ color: 'var(--accent-blue)' }}>Contacts</Link> page.
+        </p>
       </div>
 
-      {/* Target Info */}
-      <div className="glass" style={{
-        padding: '20px 24px', borderRadius: 12, marginBottom: 24,
-        display: 'flex', alignItems: 'center', gap: 16,
-      }}>
+      {/* Target summary */}
+      <div className="glass" style={{ padding: 20, borderRadius: 12, marginBottom: 20 }}>
         <div style={{
-          width: 48, height: 48, borderRadius: 12,
-          background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: 'var(--text-secondary)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 12, gap: 12, flexWrap: 'wrap',
         }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-        </div>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 2 }}>
-            Current Target
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+            Target summary
           </div>
-          {target ? (
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>
-              {target.contactName}
-              <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 8, fontWeight: 400, fontFamily: 'Fira Code, monospace' }}>
-                {target.contactJid}
-              </span>
-            </div>
-          ) : (
-            <div style={{ fontSize: 15, color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/>
-                <line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-              No contact selected
-            </div>
-          )}
+          <Link to="/contacts" className="btn-ghost" style={{
+            padding: '6px 12px', fontSize: 12, textDecoration: 'none',
+          }}>
+            Manage contacts →
+          </Link>
         </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+          <Stat label="Total targets" value={targets.length} />
+          <Stat label="Auto-reply ON" value={enabledTargets.length} highlight={canEnable} />
+          <Stat label="With custom prompt" value={targets.filter((t) => t.customPrompt).length} />
+        </div>
+
+        {enabledTargets.length > 0 && (
+          <div style={{
+            marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)',
+            display: 'flex', gap: 6, flexWrap: 'wrap',
+          }}>
+            {enabledTargets.slice(0, 8).map((t) => (
+              <span key={t.contactJid} style={{
+                fontSize: 11, padding: '4px 8px', borderRadius: 99,
+                background: 'rgba(37,211,102,0.12)', color: 'var(--accent-green)',
+                border: '1px solid rgba(37,211,102,0.25)',
+              }}>
+                {t.contactName}{t.customPrompt ? ' ✨' : ''}
+              </span>
+            ))}
+            {enabledTargets.length > 8 && (
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                +{enabledTargets.length - 8} more
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Main Control Panel */}
+      {/* Main switch */}
       <div style={{
-        padding: 32, borderRadius: 16,
+        padding: 28, borderRadius: 16,
         background: enabled ? 'rgba(37,211,102,0.08)' : 'var(--bg-card)',
-        border: '1px solid',
-        borderColor: enabled ? 'rgba(37,211,102,0.3)' : 'var(--border)',
+        border: `1px solid ${enabled ? 'rgba(37,211,102,0.3)' : 'var(--border)'}`,
         boxShadow: enabled ? '0 0 40px rgba(37,211,102,0.1)' : 'none',
         transition: 'all 300ms ease',
         textAlign: 'center',
       }}>
-        {/* Big icon */}
         <div style={{
-          width: 80, height: 80, borderRadius: '50%', margin: '0 auto 24px',
+          width: 72, height: 72, borderRadius: '50%', margin: '0 auto 16px',
           background: enabled ? 'var(--accent-green)' : 'rgba(255,255,255,0.05)',
           color: enabled ? '#000' : 'var(--text-muted)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: enabled ? '0 0 30px var(--accent-green-glow)' : 'none',
           transition: 'all 300ms ease',
+          fontSize: 32,
         }}>
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="11" width="18" height="11" rx="2"/>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-            <line x1="8" y1="16" x2="8.01" y2="16" strokeWidth="3"/>
-            <line x1="16" y1="16" x2="16.01" y2="16" strokeWidth="3"/>
-          </svg>
+          {enabled ? '⚡' : '⏸'}
         </div>
 
-        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
-          Auto-Responder is {enabled ? <span style={{ color: 'var(--accent-green)' }}>ON</span> : <span style={{ color: 'var(--text-muted)' }}>OFF</span>}
+        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+          Auto-Responder is{' '}
+          {enabled
+            ? <span style={{ color: 'var(--accent-green)' }}>ON</span>
+            : <span style={{ color: 'var(--text-muted)' }}>OFF</span>}
         </div>
-        <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 32, maxWidth: 400, margin: '0 auto 32px' }}>
-          {enabled 
-            ? 'The AI is actively reading incoming messages and responding autonomously.' 
-            : 'The AI is currently paused. Messages will be ignored until enabled.'}
+        <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 24 }}>
+          {enabled
+            ? `Replying autonomously to ${enabledTargets.length} enabled contact${enabledTargets.length === 1 ? '' : 's'}.`
+            : 'The AI is paused globally. Per-contact toggles are ignored until you enable the master switch.'}
         </p>
 
         <button
           onClick={toggle}
-          disabled={busy || !target}
+          disabled={busy || (!enabled && !canEnable)}
           className={enabled ? 'btn-danger' : 'btn-primary'}
-          style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 16 }}
+          style={{ minWidth: 220, justifyContent: 'center', padding: '12px', fontSize: 14 }}
         >
-          {busy ? (
-            <svg className="animate-spin-slow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="2" x2="12" y2="6"/>
-              <line x1="12" y1="18" x2="12" y2="22"/>
-              <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/>
-              <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
-              <line x1="2" y1="12" x2="6" y2="12"/>
-              <line x1="18" y1="12" x2="22" y2="12"/>
-              <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/>
-              <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
-            </svg>
-          ) : enabled ? (
-            <>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <line x1="9" y1="9" x2="15" y2="15"/>
-                <line x1="15" y1="9" x2="9" y2="15"/>
-              </svg>
-              Disable Auto-Responder
-            </>
-          ) : (
-            <>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
-              Enable Auto-Responder
-            </>
-          )}
+          {busy
+            ? 'Working…'
+            : enabled
+              ? 'Disable globally'
+              : 'Enable globally'}
         </button>
 
-        {!target && (
-          <div className="alert-warning" style={{ marginTop: 20, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-              <line x1="12" y1="9" x2="12" y2="13"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-            You must select a target contact before enabling the bot.
+        {!canEnable && !enabled && (
+          <div className="alert-warning" style={{ marginTop: 16, textAlign: 'left', fontSize: 12 }}>
+            Add at least one enabled target on the Contacts page before turning the bot on.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+  return (
+    <div style={{
+      padding: 12, borderRadius: 10,
+      background: 'rgba(0,0,0,0.18)', border: '1px solid var(--border)',
+    }}>
+      <div style={{
+        fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4,
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontSize: 22, fontWeight: 700,
+        color: highlight ? 'var(--accent-green)' : 'var(--text-primary)',
+      }}>
+        {value}
       </div>
     </div>
   );
