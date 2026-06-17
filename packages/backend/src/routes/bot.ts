@@ -24,7 +24,8 @@ router.post('/toggle', (req, res) => {
 router.get('/logs', (req, res) => {
   const sessionId = getOrCreateSession(null);
   const limit = Math.min(Number(req.query.limit ?? 100), 500);
-  res.json({ logs: recentConversation(sessionId, limit) });
+  const jid = typeof req.query.jid === 'string' ? req.query.jid : null;
+  res.json({ logs: recentConversation(sessionId, limit, jid) });
 });
 
 export default router;

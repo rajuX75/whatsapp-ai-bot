@@ -7,8 +7,10 @@ Mimic any WhatsApp contact with AI — Powered by Open-Source.
 ## ✨ Features
 
 - 📱 **WhatsApp QR Login** — Connects via Baileys (open-source WhatsApp Web API).
-- 👥 **Contact Selector** — Pick exactly **one** target contact at a time.
-- 📂 **Chat History Import** — Upload exported chat as `.zip` or `.txt`.
+- 👥 **Multi-Contact Selector** — Pick **one or many** target contacts and toggle auto-reply per contact (or for all of them at once).
+- 💬 **Per-Contact Custom Prompts** — Give each contact its own system-prompt override to get a different response style per person.
+- 📂 **Per-Contact Chat History Import** — Upload separate `.zip`/`.txt` exports for different contacts, each producing its own style profile.
+- ⚙️ **20+ Runtime Settings** — Live-editable UI for model, sampling, schedule, filters, rate limits, anti-ban, etc. No restart required.
 - 🧠 **Style Fingerprinting** — Extracts message length, emoji ratio, punctuation, vocabulary, burst pattern, active hours.
 - 🤖 **LLM-Powered Replies** — Supports Anthropic Claude, OpenAI GPT-4o, and local Ollama (Llama 3.1 / Mistral).
 - ⌨️ **Human-like Typing** — Random delays, presence updates, message bursts.
@@ -82,22 +84,87 @@ See `packages/backend/.env.example`. The most important:
 
 ## 📡 API Reference
 
+### Connection / contacts
+
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET  | `/api/auth/qr`        | Current QR (also via `/ws/qr`) |
-| GET  | `/api/auth/status`    | Connection status |
-| POST | `/api/auth/logout`    | Clear session |
-| GET  | `/api/contacts`       | List recent contacts |
-| POST | `/api/contacts/select`| Pick target contact |
-| GET  | `/api/contacts/active`| Current target |
-| POST | `/api/upload/chat`    | Upload `.zip`/`.txt` chat export |
-| GET  | `/api/upload/status`  | Parse progress |
-| GET  | `/api/style-profile`  | Extracted style fingerprint |
-| GET  | `/api/bot/status`     | Is the bot replying? |
-| POST | `/api/bot/toggle`     | Enable / disable |
-| GET  | `/api/logs`           | Recent conversation log |
+| GET  | `/api/auth/qr`            | Current QR (also via `/ws/qr`) |
+| GET  | `/api/auth/status`        | Connection status |
+| POST | `/api/auth/logout`        | Clear session |
+| GET  | `/api/contacts`           | List recent contacts |
+| POST | `/api/contacts/select`    | Pick the legacy single target |
+| GET  | `/api/contacts/active`    | Current legacy target |
+
+### Multi-target management (new)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET    | `/api/contacts/targets`                  | List every bot target |
+| POST   | `/api/contacts/targets`                  | Add (or upsert) a target — `{ jid, name?, enabled?, customPrompt? }` |
+| DELETE | `/api/contacts/targets/:jid`             | Remove a target |
+| POST   | `/api/contacts/targets/:jid/toggle`      | Enable/disable auto-reply for one contact — `{ enabled }` |
+| POST   | `/api/contacts/targets/all/toggle`       | Enable/disable for **all** targets — `{ enabled }` |
+| PUT    | `/api/contacts/targets/:jid/prompt`      | Set/clear per-contact custom prompt — `{ customPrompt }` |
+
+### Chat / style / logs
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/upload/chat`             | Upload export for the legacy active target |
+| POST | `/api/upload/chat/:jid`        | Upload export and bind it to a specific contact |
+| GET  | `/api/upload/status`           | Parse progress |
+| GET  | `/api/style-profile?jid=...`   | Style fingerprint (optional per-contact) |
+| GET  | `/api/bot/status`              | Is the global bot enabled? |
+| POST | `/api/bot/toggle`              | Master enable / disable |
+| GET  | `/api/bot/logs?jid=...`        | Recent conversation log (optional per-contact) |
+
+### Settings (new — live editable)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET    | `/api/settings`         | Current merged settings + defaults |
+| PUT    | `/api/settings`         | Patch any subset of the 26 runtime settings |
+| POST   | `/api/settings/reset`   | Reset all UI settings (env defaults remain) |
+
+### WebSockets
+
+| Method | Path | Purpose |
+|--------|------|---------|
 | WS   | `/ws/qr`              | QR code stream |
 | WS   | `/ws/messages`        | Live message stream |
+
+## ⚙️ Runtime Settings (UI)
+
+The **Settings** page exposes a fully functional form for every setting below. They are persisted in SQLite (table `settings`) and applied on the *very next* incoming message — no restart needed.
+
+| Group | Setting | Description |
+|-------|---------|-------------|
+| AI    | `llmProvider`            | Anthropic / OpenAI / Ollama / OpenRouter / Gemini |
+| AI    | `llmModel`               | Override the provider's model name (empty = `.env` default) |
+| AI    | `temperature`            | 0 – 2 sampler |
+| AI    | `maxTokens`              | Reply length cap |
+| AI    | `contextWindow`          | # of recent messages in the prompt |
+| Reply | `replyDelayMin/Max`      | Human-like typing window (ms) |
+| Reply | `typingIndicator`        | Send presence: composing |
+| Reply | `burstSplitEnabled`      | Allow multi-message bursts |
+| Reply | `antiBanJitter`          | Extra random delay |
+| Filter| `replyToGroups`          | Allow group replies |
+| Filter| `replyToUnknown`         | Reply to JIDs not in your target list |
+| Filter| `ignoreRegex`            | Skip messages matching this regex |
+| Filter| `allowedKeywords`        | Comma list — only reply when present |
+| Filter| `ignoredKeywords`        | Comma list — skip when present |
+| Sched | `activeHoursStart/End`   | Hour window (wraps over midnight) |
+| Sched | `weekendEnabled`         | Reply on Sat/Sun |
+| Sched | `timezoneOffset`         | Minutes vs UTC |
+| Style | `emojiBoost`             | -1..+1 emoji density nudge |
+| Style | `styleStrictness`        | 0..1 how closely to follow the fingerprint |
+| Style | `languageOverride`       | ISO code, empty = auto |
+| Safety| `maxRepliesPerHour`      | Hard cap when rate-limit is on |
+| Safety| `rateLimitEnabled`       | Turn the hourly cap on/off |
+| Safety| `doNotDisturb`           | Kill switch — ignore ALL inbound |
+| Misc  | `readReceipts`           | Mark inbound as read |
+| Misc  | `logRetentionDays`       | Days to keep logs |
+| Misc  | `globalSystemPrompt`     | Injected into the prompt for **every** contact |
 
 ## 📁 Chat Export Format
 

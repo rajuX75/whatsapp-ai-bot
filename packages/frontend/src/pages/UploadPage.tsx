@@ -1,13 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { StyleProfile } from '../types';
+import type { BotTarget, StyleProfile } from '../types';
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ inserted: number; profile: StyleProfile } | null>(null);
+  const [result, setResult] = useState<{ inserted: number; profile: StyleProfile; contactJid?: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [targets, setTargets] = useState<BotTarget[]>([]);
+  const [selectedJid, setSelectedJid] = useState<string>('');
+
+  useEffect(() => {
+    api.listTargets()
+      .then((r) => {
+        setTargets(r.targets);
+        if (r.targets.length && !selectedJid) setSelectedJid(r.targets[0]!.contactJid);
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -15,7 +27,7 @@ export default function UploadPage() {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.uploadChat(file);
+      const r = await api.uploadChat(file, selectedJid || undefined);
       setResult(r);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -31,44 +43,58 @@ export default function UploadPage() {
     if (f) setFile(f);
   };
 
+  const selectedTarget = targets.find((t) => t.contactJid === selectedJid);
+
   return (
-    <div className="animate-fade-in" style={{ maxWidth: 640 }}>
+    <div className="animate-fade-in" style={{ maxWidth: 700 }}>
       {/* Header */}
       <div className="page-header">
         <h2>Train the AI</h2>
-        <p>Upload your WhatsApp chat history so the AI can learn your vocabulary, emojis, and texting habits.</p>
+        <p>Upload a WhatsApp chat export so the AI can learn the style. Each contact has its own dedicated style profile.</p>
+      </div>
+
+      {/* Contact selector */}
+      <div className="glass" style={{ padding: 20, borderRadius: 12, marginBottom: 16 }}>
+        <label style={{ display: 'block' }}>
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+          }}>
+            Assign this chat export to
+          </div>
+          <select
+            className="input"
+            value={selectedJid}
+            onChange={(e) => setSelectedJid(e.target.value)}
+            style={{ width: '100%' }}
+          >
+            <option value="">— Use the currently active target —</option>
+            {targets.map((t) => (
+              <option key={t.contactJid} value={t.contactJid}>
+                {t.contactName} {t.enabled ? '· auto-reply ON' : ''}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+            {selectedTarget
+              ? `Style profile will be saved to "${selectedTarget.contactName}" only.`
+              : 'No specific contact selected — the upload will use the legacy active target.'}
+          </div>
+        </label>
       </div>
 
       {/* Instructions */}
-      <div className="glass" style={{
-        padding: 24, borderRadius: 12, marginBottom: 24,
-        display: 'flex', gap: 20, alignItems: 'flex-start',
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-          background: 'rgba(59,130,246,0.1)', color: 'var(--accent-blue)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 16v-4"/>
-            <path d="M12 8h.01"/>
-          </svg>
-        </div>
-        <div>
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>How to export</h3>
-          <ol style={{ margin: 0, paddingLeft: 16, fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            <li>Open WhatsApp on your phone</li>
-            <li>Go to any chat with a lot of messages</li>
-            <li>Tap <strong>⋮</strong> (Menu) → <strong>More</strong> → <strong>Export chat</strong></li>
-            <li>Select <strong>Without media</strong></li>
-            <li>Upload the <code style={{ color: 'var(--text-primary)', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>.zip</code> or <code style={{ color: 'var(--text-primary)', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 4 }}>.txt</code> here</li>
-          </ol>
-        </div>
+      <div className="glass" style={{ padding: 20, borderRadius: 12, marginBottom: 16, fontSize: 13 }}>
+        <strong style={{ color: 'var(--text-primary)' }}>How to export from WhatsApp</strong>
+        <ol style={{ margin: '8px 0 0', paddingLeft: 16, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          <li>Open the chat with the contact you selected above</li>
+          <li>Tap <strong>⋮</strong> → <strong>More</strong> → <strong>Export chat</strong></li>
+          <li>Choose <strong>Without media</strong></li>
+          <li>Upload the <code>.zip</code> or <code>.txt</code> here</li>
+        </ol>
       </div>
 
       <form onSubmit={onSubmit}>
-        {/* Dropzone */}
         <div
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
@@ -76,8 +102,8 @@ export default function UploadPage() {
           style={{
             border: `2px dashed ${isDragging ? 'var(--accent-blue)' : 'var(--border)'}`,
             background: isDragging ? 'rgba(59,130,246,0.05)' : 'var(--bg-card)',
-            borderRadius: 16, padding: 40, textAlign: 'center',
-            transition: 'all 200ms ease', marginBottom: 24,
+            borderRadius: 16, padding: 36, textAlign: 'center',
+            transition: 'all 200ms ease', marginBottom: 16,
             cursor: 'pointer', position: 'relative',
           }}
         >
@@ -90,74 +116,49 @@ export default function UploadPage() {
               opacity: 0, cursor: 'pointer',
             }}
           />
-          <div style={{ color: file ? 'var(--accent-green)' : 'var(--text-muted)', marginBottom: 16 }}>
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto' }}>
-              {file ? (
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8"/>
-              ) : (
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8l-5-5-5 5 M12 3v12"/>
-              )}
-            </svg>
-          </div>
           <div style={{ fontSize: 16, fontWeight: 600, color: file ? 'var(--accent-green)' : 'var(--text-primary)' }}>
             {file ? file.name : 'Click or drag file to upload'}
           </div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8 }}>
-            {file ? `${(file.size / 1024).toFixed(1)} KB` : 'Supports .txt and .zip files'}
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+            {file ? `${(file.size / 1024).toFixed(1)} KB` : 'Supports .txt and .zip exports'}
           </div>
         </div>
 
-        {/* Submit */}
         <button
           type="submit"
           disabled={!file || busy}
           className="btn-primary"
-          style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 16 }}
+          style={{ width: '100%', justifyContent: 'center', padding: '14px', fontSize: 15 }}
         >
-          {busy ? (
-            <>
-              <svg className="animate-spin-slow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="12" y1="2" x2="12" y2="6"/>
-                <line x1="12" y1="18" x2="12" y2="22"/>
-                <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/>
-                <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
-                <line x1="2" y1="12" x2="6" y2="12"/>
-                <line x1="18" y1="12" x2="22" y2="12"/>
-                <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/>
-                <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
-              </svg>
-              Parsing & Modeling...
-            </>
-          ) : (
-            'Train AI Model'
-          )}
+          {busy
+            ? 'Parsing & modelling…'
+            : selectedTarget
+              ? `Train AI for "${selectedTarget.contactName}"`
+              : 'Train AI (active target)'}
         </button>
       </form>
 
       {error && (
-        <div className="alert-error animate-fade-in" style={{ marginTop: 24 }}>
+        <div className="alert-error animate-fade-in" style={{ marginTop: 16 }}>
           <strong>Error:</strong> {error}
         </div>
       )}
 
       {result && (
         <div className="animate-slide-in" style={{
-          marginTop: 32, padding: 24, borderRadius: 12,
+          marginTop: 24, padding: 20, borderRadius: 12,
           background: 'rgba(37,211,102,0.08)', border: '1px solid rgba(37,211,102,0.2)'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--accent-green)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--accent-green)' }}>
-              Training Complete
-            </div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--accent-green)', marginBottom: 8 }}>
+            ✓ Training complete
           </div>
-          <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
-            Successfully parsed <strong>{result.inserted}</strong> messages into the vector database.
-            The AI has built a new stylistic profile based on this data.
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+            Parsed <strong>{result.inserted}</strong> messages.
+            {result.contactJid ? ` Style profile bound to ${result.contactJid}.` : ''}
+            <br />
+            Language: <strong>{result.profile.language}</strong> · avg length{' '}
+            <strong>{result.profile.avgMsgLength.toFixed(1)}</strong> chars · burst{' '}
+            <strong>{result.profile.burstPattern}</strong>.
           </p>
         </div>
       )}

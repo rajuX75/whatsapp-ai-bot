@@ -1,6 +1,8 @@
 import type {
   ActiveTarget,
+  BotTarget,
   ConversationLogEntry,
+  RuntimeSettings,
   StyleProfile,
   WaConnectionStatus,
   WaContactSummary,
@@ -35,17 +37,57 @@ export const api = {
   clearActive: () =>
     fetch('/api/contacts/active', { method: 'DELETE' }).then(json<{ ok: true }>),
 
-  uploadChat: (file: File) => {
+  // -------- multi-target --------
+  listTargets: () =>
+    fetch('/api/contacts/targets').then(json<{ targets: BotTarget[] }>),
+  addTarget: (
+    jid: string,
+    opts: { name?: string; enabled?: boolean; customPrompt?: string | null } = {},
+  ) =>
+    fetch('/api/contacts/targets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jid, ...opts }),
+    }).then(json<{ target: BotTarget }>),
+  removeTarget: (jid: string) =>
+    fetch(`/api/contacts/targets/${encodeURIComponent(jid)}`, {
+      method: 'DELETE',
+    }).then(json<{ ok: true }>),
+  toggleTarget: (jid: string, enabled: boolean) =>
+    fetch(`/api/contacts/targets/${encodeURIComponent(jid)}/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).then(json<{ targets: BotTarget[] }>),
+  toggleAllTargets: (enabled: boolean) =>
+    fetch('/api/contacts/targets/all/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).then(json<{ targets: BotTarget[] }>),
+  updateTargetPrompt: (jid: string, customPrompt: string | null) =>
+    fetch(`/api/contacts/targets/${encodeURIComponent(jid)}/prompt`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customPrompt }),
+    }).then(json<{ targets: BotTarget[] }>),
+
+  uploadChat: (file: File, jid?: string) => {
     const form = new FormData();
     form.append('file', file);
-    return fetch('/api/upload/chat', { method: 'POST', body: form }).then(
-      json<{ inserted: number; profile: StyleProfile }>,
+    const url = jid
+      ? `/api/upload/chat/${encodeURIComponent(jid)}`
+      : '/api/upload/chat';
+    return fetch(url, { method: 'POST', body: form }).then(
+      json<{ inserted: number; profile: StyleProfile; contactJid?: string }>,
     );
   },
   uploadStatus: () => fetch('/api/upload/status').then(json<unknown>),
 
-  styleProfile: () =>
-    fetch('/api/style-profile').then(json<{ profile: StyleProfile }>),
+  styleProfile: (jid?: string) =>
+    fetch(jid ? `/api/style-profile?jid=${encodeURIComponent(jid)}` : '/api/style-profile').then(
+      json<{ profile: StyleProfile }>,
+    ),
 
   botStatus: () => fetch('/api/bot/status').then(json<{ enabled: boolean }>),
   botToggle: (enabled: boolean) =>
@@ -54,8 +96,26 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     }).then(json<{ enabled: boolean }>),
-  logs: (limit = 100) =>
-    fetch(`/api/bot/logs?limit=${limit}`).then(
-      json<{ logs: ConversationLogEntry[] }>,
+  logs: (limit = 100, jid?: string) =>
+    fetch(
+      jid
+        ? `/api/bot/logs?limit=${limit}&jid=${encodeURIComponent(jid)}`
+        : `/api/bot/logs?limit=${limit}`,
+    ).then(json<{ logs: ConversationLogEntry[] }>),
+
+  // -------- settings --------
+  getSettings: () =>
+    fetch('/api/settings').then(
+      json<{ settings: RuntimeSettings; defaults: RuntimeSettings }>,
+    ),
+  updateSettings: (patch: Partial<RuntimeSettings>) =>
+    fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).then(json<{ settings: RuntimeSettings }>),
+  resetSettings: () =>
+    fetch('/api/settings/reset', { method: 'POST' }).then(
+      json<{ settings: RuntimeSettings }>,
     ),
 };

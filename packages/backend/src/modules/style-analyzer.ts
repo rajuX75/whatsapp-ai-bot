@@ -89,6 +89,8 @@ function topN<T>(items: T[], n: number): T[] {
 export interface AnalyseOptions {
   /** Only analyse messages from this sender (case-insensitive). If omitted, every sender is used. */
   targetSender?: string;
+  /** Contact JID this profile is bound to (multi-contact mode). Defaults to '__default__'. */
+  contactJid?: string;
 }
 
 export function analyseStyle(
@@ -105,6 +107,7 @@ export function analyseStyle(
   if (filtered.length === 0) {
     return {
       sessionId,
+      contactJid: options.contactJid ?? '__default__',
       avgMsgLength: 0,
       emojiRatio: 0,
       topEmojis: [],
@@ -171,6 +174,7 @@ export function analyseStyle(
 
   return {
     sessionId,
+    contactJid: options.contactJid ?? '__default__',
     avgMsgLength,
     emojiRatio,
     topEmojis,
